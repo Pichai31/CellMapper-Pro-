@@ -374,7 +374,7 @@
     const lat=toNum($("manualLat").value),lon=toNum($("manualLon").value),msg=$("coordMessage");
     if(!Number.isFinite(lat)||!Number.isFinite(lon)||lat < -90||lat>90||lon < -180||lon>180){msg.textContent="กรุณากรอก Latitude ระหว่าง -90 ถึง 90 และ Longitude ระหว่าง -180 ถึง 180";msg.style.color="#fca5a5";return;}
     if(state.manualCoordinateLayer)map.removeLayer(state.manualCoordinateLayer);
-    const marker=L.marker([lat,lon]).bindPopup(`<b>พิกัดจากเครื่อง SignT</b><br>Latitude: ${lat.toFixed(6)}<br>Longitude: ${lon.toFixed(6)}<br>รัศมี: 500 เมตร`);
+    const marker=L.marker([lat,lon]).bindPopup(`<b>พิกัดจากเครื่อง Sigint</b><br>Latitude: ${lat.toFixed(6)}<br>Longitude: ${lon.toFixed(6)}<br>รัศมี: 500 เมตร`);
     const circle=L.circle([lat,lon],{radius:500,color:"#ffb020",weight:2.5,opacity:1,fillColor:"#ffb020",fillOpacity:.16}).bindPopup("วงรัศมี 500 เมตร");
     state.manualCoordinateLayer=L.featureGroup([circle,marker]).addTo(map);marker.openPopup();map.fitBounds(circle.getBounds().pad(.18),{maxZoom:17});
     msg.textContent=`แสดงพิกัด ${lat.toFixed(6)}, ${lon.toFixed(6)} พร้อมวงรัศมี 500 เมตรแล้ว`;msg.style.color="#86efac";
