@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CellMapper Pro — 3G / 4G Cell Analysis GIS</title>
+
+  <!-- External libraries are loaded from CDNs; internet is required to load them and the map tiles. -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body { background:#07111f; color:#e5edf7; font-family:Tahoma,Arial,sans-serif; }
+    .panel { background:rgba(15,29,49,.96); border:1px solid #263b56; border-radius:14px; }
+    .muted { color:#9bb0c9; }
+    .field { background:#081626; border:1px solid #304761; color:#e5edf7; border-radius:9px; }
+    .btn { border-radius:9px; padding:.62rem .85rem; font-weight:700; transition:.15s; }
+    .btn-primary { background:#1677e8; color:white; }
+    .btn-primary:hover { background:#0f63c5; }
+    .btn-secondary { background:#1b3049; border:1px solid #38516e; color:#e5edf7; }
+    .btn-secondary:hover { background:#284563; }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+    #map { height: min(68vh, 760px); min-height:430px; background:#0b1725; border-radius:12px; }
+    .leaflet-popup-content-wrapper,.leaflet-popup-tip { background:#102239; color:#e5edf7; }
+    .leaflet-control-layers,.leaflet-bar a { background:#102239!important; color:#e5edf7!important; border-color:#334b66!important; }
+    .leaflet-control-layers label { color:#e5edf7; }
+    .legend-chip { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:7px; }
+    .cell-row { border:1px solid #263b56; background:#0b1a2c; border-radius:9px; padding:8px 10px; }
+    .cell-row:hover { border-color:#4c7299; }
+    .stat { background:#0b1b2e; border:1px solid #253b55; border-radius:12px; padding:12px; }
+    .stat-value { font-size:1.35rem; font-weight:800; }
+    .small-scroll { max-height:300px; overflow:auto; }
+    .tag { font-size:.72rem; border:1px solid #35516e; color:#a9c8ec; padding:2px 7px; border-radius:999px; }
+    .notice { border:1px solid #7c5c24; background:#2c2414; color:#f5d99c; border-radius:10px; padding:10px 12px; }
+    input[type="checkbox"] { accent-color:#2196f3; }
+    @media (max-width: 900px) { #map { min-height:360px; height:55vh; } }
+  </style>
+</head>
+<body>
+  <header class="border-b border-slate-800 bg-slate-950/80">
+    <div class="max-w-[1800px] mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-xl">C</div>
+          <div>
+            <h1 class="text-xl md:text-2xl font-extrabold tracking-wide">CellMapper Pro</h1>
+            <p class="text-xs md:text-sm muted">3G / 4G Cell Analysis GIS</p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="tag">CSV / XLS / XLSX</span>
+        <span class="tag">Leaflet GIS</span>
+        <span id="statusBadge" class="tag">รอข้อมูล</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1800px] mx-auto p-3 md:p-5 space-y-4">
+    <div class="notice text-sm">
+      <strong>หมายเหตุ:</strong> พื้นที่สีของ Cell เป็นขอบเขตประมาณการจากจุด GPS ที่พบ (Convex Hull + Buffer) โดยได้มาจากการวิ่งเก็บค่าสัญญาณจากแอพ Gimonpro ไม่ส่งไปยังเซิร์ฟเวอร์ของเว็บไซต์นี้ แต่แผนที่พื้นหลังและไลบรารีโหลดจากอินเทอร์เน็ต
+    </div>
+
+    <section class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div class="stat"><div class="muted text-xs">จำนวนจุด GPS</div><div id="statPoints" class="stat-value">0</div></div>
+      <div class="stat"><div class="muted text-xs">จำนวน Cell</div><div id="statCells" class="stat-value">0</div></div>
+      <div class="stat"><div class="muted text-xs">ข้อมูลใช้ได้</div><div id="statValid" class="stat-value">0</div></div>
+      <div class="stat"><div class="muted text-xs">ประเภทเครือข่าย</div><div id="statTech" class="stat-value text-lg">ยังไม่เลือก</div></div>
+    </section>
+
+    <section class="grid grid-cols-1 xl:grid-cols-[310px_minmax(0,1fr)_330px] gap-4 items-start">
+      <!-- LEFT CONTROL PANEL -->
+      <aside class="panel p-4 space-y-4">
+        <div>
+          <h2 class="font-bold text-lg">1. นำเข้าข้อมูล</h2>
+          <p class="muted text-xs mt-1">เลือกไฟล์ CSV หรือ Excel จากเครื่อง</p>
+        </div>
+        <input id="fileInput" type="file" accept=".csv,.xlsx,.xls" class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:font-semibold file:text-white field p-2" />
+        <div>
+          <label for="sheetSelect" class="block text-sm mb-1">แผ่นงาน Excel</label>
+          <select id="sheetSelect" class="field w-full p-2" disabled><option>เลือกไฟล์ Excel ก่อน</option></select>
+        </div>
+        <div>
+          <label for="techSelect" class="block text-sm mb-1">ประเภทเครือข่าย</label>
+          <select id="techSelect" class="field w-full p-2">
+            <option value="4G">4G LTE</option>
+            <option value="3G">3G UMTS</option>
+          </select>
+        </div>
+        <div>
+          <label for="cellColumn" class="block text-sm mb-1">คอลัมน์ Cell ID</label>
+          <select id="cellColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select>
+          <p class="muted text-xs mt-1">เช่น XCI, ECI, Cell ID, CI</p>
+        </div>
+        <div>
+          <label for="latColumn" class="block text-sm mb-1">คอลัมน์ Latitude</label>
+          <select id="latColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select>
+        </div>
+        <div>
+          <label for="lonColumn" class="block text-sm mb-1">คอลัมน์ Longitude</label>
+          <select id="lonColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label for="bufferInput" class="block text-sm mb-1">Buffer (เมตร)</label>
+            <input id="bufferInput" type="number" min="0" max="5000" value="30" class="field w-full p-2" />
+          </div>
+          <div>
+            <label for="minPoints" class="block text-sm mb-1">จุดขั้นต่ำ</label>
+            <select id="minPoints" class="field w-full p-2">
+              <option value="1">1 จุด</option>
+              <option value="2">2 จุด</option>
+              <option value="3" selected>3 จุด</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button id="analyzeBtn" class="btn btn-primary flex-1" disabled>วิเคราะห์และแสดงแผนที่</button>
+          <button id="clearBtn" class="btn btn-secondary">ล้าง</button>
+        </div>
+        <div id="fileMessage" class="text-xs muted break-words">ยังไม่ได้เลือกไฟล์</div>
+        <hr class="border-slate-700" />
+        <div class="space-y-2">
+          <h3 class="font-semibold">2. พิกัดจากเครื่อง Signt</h3>
+          <p class="muted text-xs">กรอก Latitude และ Longitude เพื่อปักหมุดพร้อมวงรัศมี 500 เมตร</p>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="manualLat" class="block text-sm mb-1">Latitude</label>
+              <input id="manualLat" type="number" step="any" min="-90" max="90" placeholder="เช่น 16.432100" class="field w-full p-2" />
+            </div>
+            <div>
+              <label for="manualLon" class="block text-sm mb-1">Longitude</label>
+              <input id="manualLon" type="number" step="any" min="-180" max="180" placeholder="เช่น 102.823400" class="field w-full p-2" />
+            </div>
+          </div>
+          <div class="flex gap-2">
+            <button id="addCoordBtn" type="button" class="btn btn-primary flex-1">ปักหมุด + รัศมี 500 ม.</button>
+            <button id="removeCoordBtn" type="button" class="btn btn-secondary">ลบหมุด</button>
+          </div>
+          <div id="coordMessage" class="muted text-xs" aria-live="polite">ยังไม่ได้กำหนดพิกัด</div>
+        </div>
+        <hr class="border-slate-700" />
+        <div>
+          <h3 class="font-semibold mb-2">3. ชั้นข้อมูลบนแผนที่</h3>
+          <label class="flex items-center gap-2 text-sm mb-2"><input id="toggleTrack" type="checkbox" checked /> เส้นทาง GPS สีขาว</label>
+          <label class="flex items-center gap-2 text-sm mb-2"><input id="togglePolygons" type="checkbox" checked /> พื้นที่ Cell</label>
+          <label class="flex items-center gap-2 text-sm mb-2"><input id="toggleLabels" type="checkbox" checked /> ป้ายชื่อ Cell</label>
+          <label class="flex items-center gap-2 text-sm"><input id="toggleTA" type="checkbox" /> วง TA (หากมีข้อมูล)</label>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="exportKmlBtn" class="btn btn-secondary" disabled>ส่งออก KML</button>
+          <button id="exportCsvBtn" class="btn btn-secondary" disabled>ส่งออก CSV</button>
+        </div>
+      </aside>
+
+      <!-- MAP -->
+      <section class="panel p-3 md:p-4 min-w-0">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 class="font-bold text-lg">แผนที่วิเคราะห์ Cell</h2>
+            <p class="muted text-xs">คลิกพื้นที่หรือชื่อ Cell เพื่อดูรายละเอียด</p>
+          </div>
+          <div class="flex gap-2">
+            <button id="fitBtn" class="btn btn-secondary text-sm" disabled>แสดงข้อมูลทั้งหมด</button>
+            <button id="baseBtn" class="btn btn-secondary text-sm">เปลี่ยนแผนที่</button>
+          </div>
+        </div>
+        <div id="map"></div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs muted">
+          <span><i class="legend-chip" style="background:white"></i>เส้นทาง GPS</span>
+          <span><i class="legend-chip" style="background:#32a5ff"></i>พื้นที่ Cell (สีสุ่ม)</span>
+          <span>สีของ Cell ถูกกำหนดคงที่ภายในการวิเคราะห์ครั้งนี้</span>
+        </div>
+      </section>
+
+      <!-- RIGHT DETAILS AND CELL LIST -->
+      <aside class="panel p-4 space-y-4">
+        <div>
+          <h2 class="font-bold text-lg">รายละเอียด Cell</h2>
+          <p class="muted text-xs mt-1">เลือก Cell จากรายการหรือคลิกบนแผนที่</p>
+        </div>
+        <div id="detailPanel" class="rounded-xl border border-slate-700 bg-slate-950/50 p-3 text-sm">
+          <p class="muted">ยังไม่มี Cell ที่เลือก</p>
+        </div>
+        <div>
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h3 class="font-semibold">รายการ Cell</h3>
+            <div class="flex gap-1">
+              <button id="showAllBtn" class="text-xs btn btn-secondary !px-2 !py-1">เปิดทั้งหมด</button>
+              <button id="hideAllBtn" class="text-xs btn btn-secondary !px-2 !py-1">ปิดทั้งหมด</button>
+            </div>
+          </div>
+          <input id="searchCell" type="search" placeholder="ค้นหา Cell ID..." class="field w-full p-2 mb-2 text-sm" />
+          <div id="cellList" class="small-scroll space-y-2">
+            <p class="muted text-sm">นำเข้าข้อมูลเพื่อแสดงรายการ Cell</p>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="panel p-4">
+      <h2 class="font-bold mb-2">ตัวอย่างคอลัมน์ที่ระบบรองรับ</h2>
+      <p class="muted text-sm leading-6">
+        พิกัด: <code>LAT / LON</code>, <code>Latitude / Longitude</code>, <code>Lat / Long</code> |
+        Cell: <code>XCI</code>, <code>ECI</code>, <code>Cell ID</code>, <code>CI</code> |
+        รายละเอียดเสริม: <code>PLMN</code>, <code>PCI/PSC/BSIC</code>, <code>LAC/TAC</code>, <code>EARFCN</code>, <code>UARFCN</code>, <code>RSRP</code>, <code>RSRQ</code>, <code>RSCP</code>, <code>Ec/No</code>, <code>TA</code>, <code>DATE</code>, <code>TIME</code>.
+        ชื่อคอลัมน์อื่นสามารถเลือกเองจากรายการคอลัมน์ได้สำหรับ Cell ID และพิกัด
+      </p>
+    </section>
+    <footer class="text-center text-xs muted py-4 border-t border-slate-800">
+      CellMapper Pro • ประมวลผลในเบราว์เซอร์ • ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปใช้งาน<br />
+      ฝ่ายวิเคราะห์ข้อมูล • ชุดปฏิบัติการพิเศษ • ผู้พัฒนา: ส.ต.อ.พิชัย สมปัญญา
+    </footer>
+  </main>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    rawRows: [], headers: [], fileName: "", workbook: null, sheetNames: [],
+    rows: [], cells: [], selectedCell: null, colorByCell: new Map(),
+    polygonLayers: new Map(), labelLayers: new Map(), taLayers: [],
+    trackLayer: null, polygonGroup: null, labelGroup: null, taGroup: null,
+    manualCoordinateLayer: null,
+    baseLayer: null, baseIsDark: true, analysisDone: false
+  };
+
+  const map = L.map("map", { preferCanvas: true }).setView([15.2, 101.0], 6);
+  const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; CARTO',
+    subdomains: "abcd", maxZoom: 20
+  });
+  const lightTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+  });
+  // Satellite imagery tiles from Esri. Requires internet access.
+  const satelliteTiles = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community", maxZoom: 19 }
+  );
+  state.baseLayer = darkTiles.addTo(map);
+  state.polygonGroup = L.featureGroup().addTo(map);
+  state.labelGroup = L.featureGroup().addTo(map);
+  state.taGroup = L.featureGroup();
+  const overlayControl = L.control.layers(
+    { "แผนที่โทนมืด": darkTiles, "แผนที่ถนน": lightTiles, "แผนที่ดาวเทียม": satelliteTiles },
+    { "พื้นที่ Cell": state.polygonGroup, "ป้าย Cell": state.labelGroup, "วง TA": state.taGroup },
+    { collapsed: true }
+  ).addTo(map);
+
+  const aliases = {
+    cell: ["XCI", "ECI", "CELL ID", "CELLID", "CELL_ID", "CI", "CELL", "CELL IDENTIFIER", "GCI", "CGI", "UCELLID", "CELL IDENTITY"],
+    lat: ["LAT", "LATITUDE", "LATITUDE DEG", "GPS LAT", "GPS_LAT", "Y"],
+    lon: ["LON", "LONG", "LONGITUDE", "LONGITUDE DEG", "GPS LON", "GPS_LON", "X"],
+    plmn: ["PLMN", "MCCMNC"],
+    pci: ["PCI/PSC/BSIC", "PCI", "PSC", "BSIC"],
+    tac: ["LAC/TAC", "TAC", "LAC"],
+    ta: ["TA", "TIMING ADVANCE"],
+    date: ["DATE", "DAY"],
+    time: ["TIME", "TIMESTAMP", "DATETIME"]
+  };
+
+  function norm(s) { return String(s ?? "").replace(/^\uFEFF/, "").trim().toUpperCase().replace(/[\s_\-()[\]./]+/g, ""); }
+  function findHeader(keys, headers = state.headers) {
+    const nheaders = headers.map(h => ({ original: h, normalized: norm(h) }));
+    for (const key of keys) {
+      const k = norm(key);
+      const exact = nheaders.find(h => h.normalized === k);
+      if (exact) return exact.original;
+    }
+    for (const key of keys) {
+      const k = norm(key);
+      const partial = nheaders.find(h => h.normalized.includes(k) || k.includes(h.normalized));
+      if (partial) return partial.original;
+    }
+    return "";
+  }
+  function toNum(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return NaN;
+    if (typeof value === "number") return value;
+    return Number(String(value).trim().replace(/,/g, ""));
+  }
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  }
+  function randomColor(index) {
+    // Deterministic vivid palette: a cell keeps the same color within one analysis.
+    const hue = (index * 137.508 + 24) % 360;
+    return `hsl(${hue}, 82%, 58%)`;
+  }
+  function hslToHex(hsl) {
+    const m = hsl.match(/hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
+    if (!m) return "#2f9cff";
+    let h = Number(m[1]), s = Number(m[2]) / 100, l = Number(m[3]) / 100;
+    const a = s * Math.min(l, 1-l);
+    const f = n => {
+      const k = (n + h/30) % 12;
+      const c = l - a * Math.max(-1, Math.min(k-3, 9-k, 1));
+      return Math.round(255*c).toString(16).padStart(2, "0");
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  }
+  function setStatus(text) { $("statusBadge").textContent = text; }
+  function fillSelect(select, headers, selected) {
+    select.innerHTML = "";
+    headers.forEach(h => {
+      const opt = document.createElement("option");
+      opt.value = h; opt.textContent = h;
+      if (h === selected) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.disabled = headers.length === 0;
+  }
+  function setupHeaderSelectors() {
+    const cell = findHeader(aliases.cell);
+    const lat = findHeader(aliases.lat);
+    const lon = findHeader(aliases.lon);
+    fillSelect($("cellColumn"), state.headers, cell);
+    fillSelect($("latColumn"), state.headers, lat);
+    fillSelect($("lonColumn"), state.headers, lon);
+    $("analyzeBtn").disabled = !state.rawRows.length || !state.headers.length;
+  }
+
+  async function parseFile(file) {
+    state.fileName = file.name;
+    const ext = file.name.split(".").pop().toLowerCase();
+    $("fileMessage").textContent = `กำลังอ่านไฟล์ ${file.name}...`;
+    try {
+      let rows = [];
+      if (ext === "csv") {
+        const text = await file.text();
+        const result = Papa.parse(text, { header: true, skipEmptyLines: "greedy", dynamicTyping: false });
+        if (result.errors?.length) {
+          const serious = result.errors.filter(e => e.code !== "TooFewFields");
+          if (serious.length) console.warn("CSV parse warnings:", serious.slice(0, 5));
+        }
+        rows = result.data;
+      } else if (ext === "xlsx" || ext === "xls") {
+        const data = await file.arrayBuffer();
+        state.workbook = XLSX.read(data, { type: "array", cellDates: false });
+        state.sheetNames = state.workbook.SheetNames || [];
+        $("sheetSelect").innerHTML = "";
+        state.sheetNames.forEach((name, i) => {
+          const opt = document.createElement("option");
+          opt.value = name; opt.textContent = name;
+          if (i === 0) opt.selected = true;
+          $("sheetSelect").appendChild(opt);
+        });
+        $("sheetSelect").disabled = state.sheetNames.length === 0;
+        rows = readWorkbookSheet(state.sheetNames[0]);
+      } else {
+        throw new Error("รองรับเฉพาะไฟล์ CSV, XLS และ XLSX");
+      }
+      loadRows(rows);
+    } catch (err) {
+      $("fileMessage").textContent = `อ่านไฟล์ไม่สำเร็จ: ${err.message}`;
+      setStatus("เกิดข้อผิดพลาด");
+      $("analyzeBtn").disabled = true;
+    }
+  }
+  function readWorkbookSheet(sheetName) {
+    if (!state.workbook || !sheetName) return [];
+    const sheet = state.workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  }
+  function loadRows(rows) {
+    state.rawRows = rows.filter(r => r && Object.keys(r).some(k => String(r[k] ?? "").trim() !== ""));
+    state.headers = state.rawRows.length ? Object.keys(state.rawRows[0]) : [];
+    setupHeaderSelectors();
+    $("fileMessage").textContent = `ไฟล์: ${state.fileName} • ${state.rawRows.length.toLocaleString()} แถว • ${state.headers.length} คอลัมน์`;
+    setStatus(state.rawRows.length ? "นำเข้าข้อมูลแล้ว" : "ไม่มีข้อมูล");
+    $("statPoints").textContent = "0";
+    $("statCells").textContent = "0";
+    $("statValid").textContent = "0";
+    $("statTech").textContent = $("techSelect").value;
+    if (!state.rawRows.length) alert("ไม่พบข้อมูลในไฟล์ หรือชื่อคอลัมน์ไม่ถูกต้อง");
+  }
+
+  function parsePLMN(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return { mcc:"", mnc:"" };
+    const s = String(value).trim();
+    let parts = s.split(/[/-]/);
+    if (parts.length >= 2 && /^\d{3}$/.test(parts[0].trim()) && /^\d{1,3}$/.test(parts[1].trim())) {
+      return { mcc: parts[0].trim(), mnc: parts[1].trim().padStart(parts[1].trim().length, "0") };
+    }
+    const digits = s.replace(/\D/g, "");
+    if (digits.length >= 5) return { mcc: digits.slice(0,3), mnc: digits.slice(3) };
+    return { mcc:"", mnc:"" };
+  }
+  function getVal(row, keys) {
+    const key = findHeader(keys);
+    return key ? row[key] : "";
+  }
+  function clearMapLayers() {
+    state.polygonGroup.clearLayers();
+    state.labelGroup.clearLayers();
+    state.taGroup.clearLayers();
+    if (state.trackLayer) { map.removeLayer(state.trackLayer); state.trackLayer = null; }
+    state.polygonLayers.clear();
+    state.labelLayers.clear();
+    state.taLayers = [];
+  }
+  function clearAll() {
+    state.rawRows = []; state.headers = []; state.rows = []; state.cells = [];
+    state.colorByCell.clear(); state.selectedCell = null; state.analysisDone = false;
+    state.workbook = null; state.sheetNames = []; state.fileName = "";
+    clearMapLayers();
+    $("fileInput").value = "";
+    $("sheetSelect").innerHTML = '<option>เลือกไฟล์ Excel ก่อน</option>'; $("sheetSelect").disabled = true;
+    ["cellColumn","latColumn","lonColumn"].forEach(id => { $(id).innerHTML = '<option>นำเข้าข้อมูลก่อน</option>'; $(id).disabled = true; });
+    $("analyzeBtn").disabled = true; $("exportKmlBtn").disabled = true; $("exportCsvBtn").disabled = true; $("fitBtn").disabled = true;
+    $("fileMessage").textContent = "ยังไม่ได้เลือกไฟล์";
+    $("cellList").innerHTML = '<p class="muted text-sm">นำเข้าข้อมูลเพื่อแสดงรายการ Cell</p>';
+    $("detailPanel").innerHTML = '<p class="muted">ยังไม่มี Cell ที่เลือก</p>';
+    $("statPoints").textContent = "0"; $("statCells").textContent = "0"; $("statValid").textContent = "0"; $("statTech").textContent = "ยังไม่เลือก";
+    setStatus("รอข้อมูล");
+    map.setView([15.2, 101.0], 6);
+  }
+
+  function buildPolygonForCell(group, bufferMeters) {
+    const unique = [];
+    const seen = new Set();
+    group.forEach(r => {
+      const k = `${r.lon.toFixed(7)},${r.lat.toFixed(7)}`;
+      if (!seen.has(k)) { seen.add(k); unique.push([r.lon, r.lat]); }
+    });
+    if (unique.length >= 3) {
+      try {
+        const points = turf.featureCollection(unique.map(c => turf.point(c)));
+        let hull = turf.convex(points);
+        if (hull) {
+          if (bufferMeters > 0) hull = turf.buffer(hull, bufferMeters / 1000, { units: "kilometers" });
+          return hull;
+        }
+      } catch (e) { console.warn("Polygon generation failed", e); }
+    }
+    if (unique.length === 2) {
+      const line = turf.lineString(unique);
+      if (bufferMeters > 0) return turf.buffer(line, bufferMeters / 1000, { units: "kilometers" });
+      return null;
+    }
+    if (unique.length === 1 && bufferMeters > 0) {
+      return turf.buffer(turf.point(unique[0]), bufferMeters / 1000, { units: "kilometers" });
+    }
+    return null;
+  }
+  function featureToLayer(feature, style, onClick) {
+    const layer = L.geoJSON(feature, { style, onEachFeature: (_f, lyr) => { if (onClick) lyr.on("click", onClick); } });
+    return layer;
+  }
+  function analyze() {
+    if (!state.rawRows.length) return;
+    const cellCol = $("cellColumn").value, latCol = $("latColumn").value, lonCol = $("lonColumn").value;
+    if (!cellCol || !latCol || !lonCol) {
+      alert("กรุณาเลือกคอลัมน์ Cell ID, Latitude และ Longitude ให้ครบ");
+      return;
+    }
+    const bufferMeters = Math.max(0, Math.min(5000, toNum($("bufferInput").value) || 0));
+    const minPts = Number($("minPoints").value) || 1;
+    const rows = [];
+    let invalid = 0;
+    for (const original of state.rawRows) {
+      const lat = toNum(original[latCol]), lon = toNum(original[lonCol]);
+      const cell = String(original[cellCol] ?? "").trim();
+      if (!cell || !Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        invalid++; continue;
+      }
+      rows.push({
+        original, cell, lat, lon,
+        date: getVal(original, ["DATE"]),
+        time: getVal(original, ["TIME"]),
+        plmn: getVal(original, aliases.plmn),
+        pci: getVal(original, aliases.pci),
+        tac: getVal(original, aliases.tac),
+        ta: getVal(original, aliases.ta),
+        earfcn: getVal(original, ["EARFCN"]),
+        uarfcn: getVal(original, ["UARFCN"]),
+        rsrp: getVal(original, ["RSRP"]),
+        rsrq: getVal(original, ["RSRQ"]),
+        sinr: getVal(original, ["SINR"]),
+        rscp: getVal(original, ["RSCP"]),
+        ecno: getVal(original, ["EC/NO", "ECNO"])
+      });
+    }
+    if (!rows.length) {
+      alert("ไม่พบแถวที่มี Cell ID และพิกัดถูกต้อง โปรดตรวจชื่อคอลัมน์และข้อมูล");
+      return;
+    }
+    state.rows = rows;
+    const grouped = new Map();
+    rows.forEach(r => {
+      if (!grouped.has(r.cell)) grouped.set(r.cell, []);
+      grouped.get(r.cell).push(r);
+    });
+    const cells = [...grouped.entries()].map(([id, group], idx) => {
+      const color = randomColor(idx);
+      const lats = group.map(r => r.lat), lons = group.map(r => r.lon);
+      const center = [lats.reduce((a,b)=>a+b,0)/lats.length, lons.reduce((a,b)=>a+b,0)/lons.length];
+      const first = group[0];
+      const plmn = parsePLMN(first.plmn);
+      return {
+        id, group, count: group.length, color, colorHex: hslToHex(color), center,
+        mcc: plmn.mcc, mnc: plmn.mnc, pci: first.pci, tac: first.tac, plmnRaw: first.plmn,
+        earfcn: first.earfcn, uarfcn: first.uarfcn,
+        rsrp: meanNumeric(group, "rsrp"), rsrq: meanNumeric(group, "rsrq"), sinr: meanNumeric(group, "sinr"),
+        rscp: meanNumeric(group, "rscp"), ecno: meanNumeric(group, "ecno"),
+        ta: first.ta, feature: null, polygonLayer: null, labelLayer: null, visible: true
+      };
+    }).sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric:true}));
+    // Re-assign deterministic colors after sorting for a consistent list order.
+    cells.forEach((c, i) => { c.color = randomColor(i); c.colorHex = hslToHex(c.color); });
+    state.cells = cells;
+    state.colorByCell = new Map(cells.map(c => [c.id, c.colorHex]));
+    clearMapLayers();
+
+    const trackCoords = rows.map(r => [r.lat, r.lon]);
+    state.trackLayer = L.polyline(trackCoords, { color:"#ffffff", weight:2.5, opacity:.92, smoothFactor:1 }).bindPopup("GPS Track — เส้นทางตามลำดับข้อมูล");
+    if ($("toggleTrack").checked) state.trackLayer.addTo(map);
+
+    cells.forEach(cell => {
+      const feature = buildPolygonForCell(cell.group, bufferMeters);
+      cell.feature = feature;
+      if (feature && cell.count >= minPts) {
+        cell.polygonLayer = featureToLayer(feature, {
+          color: cell.colorHex, weight: 1.5, opacity: .95,
+          fillColor: cell.colorHex, fillOpacity: .24
+        }, () => selectCell(cell.id));
+        cell.polygonLayer.bindPopup(`<b>Cell ${escapeHtml(cell.id)}</b><br>จำนวนจุด: ${cell.count}<br>คลิกเพื่อดูรายละเอียด`);
+        state.polygonLayers.set(cell.id, cell.polygonLayer);
+        if ($("togglePolygons").checked) cell.polygonLayer.addTo(state.polygonGroup);
+      }
+      const marker = L.circleMarker(cell.center, {
+        radius: 4, color: cell.colorHex, weight: 1.5, fillColor: cell.colorHex, fillOpacity: 1
+      });
+      marker.bindTooltip(escapeHtml(cell.id), { permanent: true, direction:"top", className:"cell-label" });
+      marker.on("click", () => selectCell(cell.id));
+      cell.labelLayer = marker;
+      state.labelLayers.set(cell.id, marker);
+      if ($("toggleLabels").checked) marker.addTo(state.labelGroup);
+    });
+
+    buildTARings(rows);
+    updateStats(invalid);
+    renderCellList();
+    state.analysisDone = true;
+    $("exportKmlBtn").disabled = false; $("exportCsvBtn").disabled = false; $("fitBtn").disabled = false;
+    setStatus("วิเคราะห์สำเร็จ");
+    const allLayers = [];
+    if (state.trackLayer) allLayers.push(state.trackLayer);
+    cells.forEach(c => { if (c.polygonLayer) allLayers.push(c.polygonLayer); if (c.labelLayer) allLayers.push(c.labelLayer); });
+    const boundsGroup = L.featureGroup(allLayers);
+    if (boundsGroup.getLayers().length) {
+      const bounds = boundsGroup.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds.pad(.12), { maxZoom: 16 });
+    }
+    if (cells.length) selectCell(cells[0].id);
+    $("fileMessage").textContent = `วิเคราะห์เสร็จ: ${rows.length.toLocaleString()} จุดใช้ได้ • ${invalid.toLocaleString()} แถวถูกข้าม • ${cells.length.toLocaleString()} Cell`;
+  }
+  function meanNumeric(group, key) {
+    const values = group.map(r => toNum(r[key])).filter(Number.isFinite);
+    return values.length ? values.reduce((a,b)=>a+b,0)/values.length : null;
+  }
+  function fmt(value, digits=2) {
+    return value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? "ไม่มีข้อมูล" : Number(value).toFixed(digits);
+  }
+  function buildTARings(rows) {
+    state.taGroup.clearLayers(); state.taLayers = [];
+    if (!$("toggleTA").checked) { map.removeLayer(state.taGroup); return; }
+    state.taGroup.addTo(map);
+    rows.forEach((r, idx) => {
+      if (idx % 20 !== 0) return;
+      const ta = toNum(r.ta);
+      if (!Number.isFinite(ta) || ta < 0) return;
+      // Same approximate conversion concept as original script: 1 TA unit ~= 78 m.
+      const radius = ta * 78;
+      if (radius <= 0 || radius > 100000) return;
+      const circle = L.circle([r.lat, r.lon], {
+        radius, color:"#3b82f6", weight:1, opacity:.65,
+        fillColor:"#3b82f6", fillOpacity:.05
+      }).bindPopup(`TA: ${ta}<br>รัศมีโดยประมาณ: ${Math.round(radius)} เมตร`);
+      state.taLayers.push(circle);
+      circle.addTo(state.taGroup);
+    });
+  }
+  function updateStats(invalid) {
+    $("statPoints").textContent = state.rows.length.toLocaleString();
+    $("statCells").textContent = state.cells.length.toLocaleString();
+    $("statValid").textContent = `${state.rows.length.toLocaleString()} / ${(state.rows.length + invalid).toLocaleString()}`;
+    $("statTech").textContent = $("techSelect").value === "4G" ? "4G LTE" : "3G UMTS";
+  }
+  function renderCellList() {
+    const q = $("searchCell").value.trim().toLowerCase();
+    const filtered = state.cells.filter(c => c.id.toLowerCase().includes(q));
+    if (!filtered.length) {
+      $("cellList").innerHTML = '<p class="muted text-sm">ไม่พบ Cell ที่ค้นหา</p>'; return;
+    }
+    $("cellList").innerHTML = "";
+    filtered.forEach(cell => {
+      const row = document.createElement("div");
+      row.className = "cell-row";
+      row.innerHTML = `
+        <div class="flex items-start gap-2">
+          <input type="checkbox" class="cell-toggle mt-1" ${cell.visible ? "checked" : ""} aria-label="แสดง ${escapeHtml(cell.id)}" />
+          <button class="text-left flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-3 h-3 rounded-full shrink-0" style="background:${cell.colorHex}"></span>
+              <span class="font-semibold text-sm break-all">${escapeHtml(cell.id)}</span>
+            </div>
+            <div class="muted text-xs mt-1">${cell.count.toLocaleString()} จุด GPS</div>
+          </button>
+        </div>`;
+      const checkbox = row.querySelector(".cell-toggle");
+      checkbox.addEventListener("change", () => {
+        cell.visible = checkbox.checked;
+        applyCellVisibility(cell);
+      });
+      row.querySelector("button").addEventListener("click", () => selectCell(cell.id));
+      $("cellList").appendChild(row);
+    });
+  }
+  function applyCellVisibility(cell) {
+    if (cell.polygonLayer) {
+      if (cell.visible && $("togglePolygons").checked) cell.polygonLayer.addTo(state.polygonGroup);
+      else state.polygonGroup.removeLayer(cell.polygonLayer);
+    }
+    if (cell.labelLayer) {
+      if (cell.visible && $("toggleLabels").checked) cell.labelLayer.addTo(state.labelGroup);
+      else state.labelGroup.removeLayer(cell.labelLayer);
+    }
+  }
+  function selectCell(id) {
+    const cell = state.cells.find(c => c.id === id);
+    if (!cell) return;
+    state.selectedCell = id;
+    const fields = [
+      ["Technology", $("techSelect").value === "4G" ? "4G LTE" : "3G UMTS"],
+      ["Cell ID / XCI", cell.id],
+      ["MCC", cell.mcc || "ไม่มีข้อมูล"],
+      ["MNC", cell.mnc || "ไม่มีข้อมูล"],
+      ["PLMN", cell.plmnRaw || "ไม่มีข้อมูล"],
+      [$("techSelect").value === "4G" ? "PCI" : "PSC", cell.pci || "ไม่มีข้อมูล"],
+      [$("techSelect").value === "4G" ? "TAC" : "LAC", cell.tac || "ไม่มีข้อมูล"],
+      ["EARFCN", cell.earfcn || "ไม่มีข้อมูล"],
+      ["UARFCN", cell.uarfcn || "ไม่มีข้อมูล"],
+      ["จำนวนจุด GPS", cell.count.toLocaleString()],
+      ["Latitude เฉลี่ย", fmt(cell.center[0], 6)],
+      ["Longitude เฉลี่ย", fmt(cell.center[1], 6)],
+      ["RSRP เฉลี่ย (dBm)", fmt(cell.rsrp)],
+      ["RSRQ เฉลี่ย (dB)", fmt(cell.rsrq)],
+      ["SINR เฉลี่ย (dB)", fmt(cell.sinr)],
+      ["RSCP เฉลี่ย (dBm)", fmt(cell.rscp)],
+      ["Ec/No เฉลี่ย (dB)", fmt(cell.ecno)],
+      ["TA ตัวอย่าง", cell.ta === "" || cell.ta == null ? "ไม่มีข้อมูล" : String(cell.ta)]
+    ];
+    $("detailPanel").innerHTML = `
+      <div class="flex items-center gap-2 mb-3">
+        <span class="inline-block w-4 h-4 rounded" style="background:${cell.colorHex}"></span>
+        <div class="font-bold break-all">${escapeHtml(cell.id)}</div>
+      </div>
+      <div class="space-y-2">${fields.map(([k,v]) => `<div class="flex justify-between gap-3 border-b border-slate-800 pb-1"><span class="muted">${escapeHtml(k)}</span><span class="text-right break-all font-medium">${escapeHtml(v)}</span></div>`).join("")}</div>
+      <div class="mt-3 flex gap-2">
+        <button id="zoomCellBtn" class="btn btn-secondary text-xs flex-1">ซูมไปยัง Cell</button>
+        <button id="toggleSelectedBtn" class="btn btn-secondary text-xs flex-1">${cell.visible ? "ซ่อน Cell" : "แสดง Cell"}</button>
+      </div>`;
+    $("zoomCellBtn").addEventListener("click", () => {
+      if (cell.polygonLayer && state.polygonGroup.hasLayer(cell.polygonLayer)) {
+        const b = cell.polygonLayer.getBounds();
+        if (b.isValid()) map.fitBounds(b.pad(.25), { maxZoom: 17 });
+      } else map.setView(cell.center, 16);
+    });
+    $("toggleSelectedBtn").addEventListener("click", () => {
+      cell.visible = !cell.visible; applyCellVisibility(cell); renderCellList(); selectCell(cell.id);
+    });
+  }
+
+  function exportKML() {
+    if (!state.analysisDone) return;
+    const xmlEsc = s => escapeHtml(s);
+    const kmlColor = (hex, alpha="99") => {
+      const h = hex.replace("#", "");
+      return alpha + h.slice(4,6) + h.slice(2,4) + h.slice(0,2); // KML uses AABBGGRR
+    };
+    const placemarks = [];
+    const tech = $("techSelect").value;
+    const trackCoordinates = state.rows.map(r => `${r.lon},${r.lat},0`).join(" ");
+    placemarks.push(`<Placemark><name>GPS Track</name><description>เส้นทาง GPS จากไฟล์ ${xmlEsc(state.fileName)}</description><Style><LineStyle><color>ffffffff</color><width>3</width></LineStyle></Style><LineString><tessellate>1</tessellate><coordinates>${trackCoordinates}</coordinates></LineString></Placemark>`);
+    state.cells.forEach(cell => {
+      if (cell.feature && cell.count >= Number($("minPoints").value)) {
+        const geom = cell.feature.geometry;
+        const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+        polys.forEach((poly, idx) => {
+          const outer = poly[0].map(c => `${c[0]},${c[1]},0`).join(" ");
+          const inner = poly.slice(1).map(ring => `<innerBoundaryIs><LinearRing><coordinates>${ring.map(c => `${c[0]},${c[1]},0`).join(" ")}</coordinates></LinearRing></innerBoundaryIs>`).join("");
+          placemarks.push(`<Placemark><name>${xmlEsc(cell.id)}</name><description>${xmlEsc(`Technology: ${tech}\nMCC: ${cell.mcc}\nMNC: ${cell.mnc}\nPCI/PSC: ${cell.pci}\nLAC/TAC: ${cell.tac}\nPoints: ${cell.count}`)}</description><Style><PolyStyle><color>${kmlColor(cell.colorHex, "55")}</color><fill>1</fill><outline>1</outline></PolyStyle><LineStyle><color>${kmlColor(cell.colorHex, "ff")}</color><width>1.5</width></LineStyle></Style><Polygon><tessellate>1</tessellate><outerBoundaryIs><LinearRing><coordinates>${outer}</coordinates></LinearRing></outerBoundaryIs>${inner}</Polygon></Placemark>`);
+        });
+      }
+      placemarks.push(`<Placemark><name>${xmlEsc(cell.id)}</name><description>${xmlEsc(`Technology: ${tech}\nPoints: ${cell.count}`)}</description><Style><IconStyle><scale>0.5</scale></IconStyle><LabelStyle><color>ffffffff</color><scale>0.8</scale></LabelStyle></Style><Point><coordinates>${cell.center[1]},${cell.center[0]},0</coordinates></Point></Placemark>`);
+    });
+    const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>CellMapper Pro - ${xmlEsc(state.fileName)}</name><Folder><name>GPS TRACK</name>${placemarks[0]}</Folder><Folder><name>CELL COVERAGE</name>${placemarks.slice(1).join("")}</Folder></Document></kml>`;
+    downloadBlob(kml, `Cell_Analysis_${new Date().toISOString().slice(0,10)}.kml`, "application/vnd.google-earth.kml+xml;charset=utf-8");
+  }
+  function exportCSV() {
+    if (!state.analysisDone) return;
+    const data = state.cells.map(c => ({
+      Technology: $("techSelect").value,
+      CellID: c.id, PLMN: c.plmnRaw, MCC: c.mcc, MNC: c.mnc,
+      PCI_PSC: c.pci, LAC_TAC: c.tac, EARFCN: c.earfcn, UARFCN: c.uarfcn,
+      Points: c.count, Center_LAT: c.center[0], Center_LON: c.center[1],
+      Mean_RSRP: c.rsrp, Mean_RSRQ: c.rsrq, Mean_SINR: c.sinr, Mean_RSCP: c.rscp, Mean_EcNo: c.ecno,
+      DisplayColor: c.colorHex
+    }));
+    const csv = Papa.unparse(data);
+    downloadBlob("\ufeff" + csv, `Cell_Summary_${new Date().toISOString().slice(0,10)}.csv`, "text/csv;charset=utf-8");
+  }
+  function downloadBlob(content, filename, type) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $("fileInput").addEventListener("change", e => {
+    const file = e.target.files?.[0];
+    if (file) parseFile(file);
+  });
+  $("sheetSelect").addEventListener("change", () => {
+    const rows = readWorkbookSheet($("sheetSelect").value);
+    loadRows(rows);
+  });
+  $("analyzeBtn").addEventListener("click", () => {
+    try { analyze(); } catch (e) { console.error(e); alert("เกิดข้อผิดพลาดขณะวิเคราะห์: " + e.message); setStatus("วิเคราะห์ไม่สำเร็จ"); }
+  });
+  $("clearBtn").addEventListener("click", clearAll);
+  $("exportKmlBtn").addEventListener("click", exportKML);
+  $("exportCsvBtn").addEventListener("click", exportCSV);
+  $("fitBtn").addEventListener("click", () => {
+    const layers = [];
+    if (state.trackLayer) layers.push(state.trackLayer);
+    state.cells.forEach(c => { if (c.visible && c.polygonLayer) layers.push(c.polygonLayer); if (c.visible && c.labelLayer) layers.push(c.labelLayer); });
+    const fg = L.featureGroup(layers);
+    if (fg.getLayers().length && fg.getBounds().isValid()) map.fitBounds(fg.getBounds().pad(.12), { maxZoom: 16 });
+  });
+  let baseMapIndex = 0;
+  const baseMaps = [darkTiles, lightTiles, satelliteTiles];
+  $("baseBtn").textContent = "เปลี่ยนแผนที่ (มืด)";
+  $("baseBtn").addEventListener("click", () => {
+    if (map.hasLayer(state.baseLayer)) map.removeLayer(state.baseLayer);
+    baseMapIndex = (baseMapIndex + 1) % baseMaps.length;
+    state.baseLayer = baseMaps[baseMapIndex];
+    state.baseLayer.addTo(map);
+    state.baseLayer.bringToBack();
+    $("baseBtn").textContent = ["เปลี่ยนแผนที่ (มืด)", "เปลี่ยนแผนที่ (ถนน)", "เปลี่ยนแผนที่ (ดาวเทียม)"][baseMapIndex];
+  });
+  $("toggleTrack").addEventListener("change", () => {
+    if (!state.trackLayer) return;
+    if ($("toggleTrack").checked) state.trackLayer.addTo(map); else map.removeLayer(state.trackLayer);
+  });
+  $("togglePolygons").addEventListener("change", () => {
+    state.cells.forEach(c => {
+      if (!c.polygonLayer) return;
+      if ($("togglePolygons").checked && c.visible) c.polygonLayer.addTo(state.polygonGroup);
+      else state.polygonGroup.removeLayer(c.polygonLayer);
+    });
+  });
+  $("toggleLabels").addEventListener("change", () => {
+    state.cells.forEach(c => {
+      if (!c.labelLayer) return;
+      if ($("toggleLabels").checked && c.visible) c.labelLayer.addTo(state.labelGroup);
+      else state.labelGroup.removeLayer(c.labelLayer);
+    });
+  });
+  $("toggleTA").addEventListener("change", () => {
+    if (!state.analysisDone) return;
+    buildTARings(state.rows);
+  });
+  $("showAllBtn").addEventListener("click", () => {
+    state.cells.forEach(c => { c.visible = true; applyCellVisibility(c); });
+    renderCellList();
+  });
+  $("hideAllBtn").addEventListener("click", () => {
+    state.cells.forEach(c => { c.visible = false; applyCellVisibility(c); });
+    renderCellList();
+  });
+  $("searchCell").addEventListener("input", renderCellList);
+  $("addCoordBtn").addEventListener("click", () => {
+    const lat = toNum($("manualLat").value);
+    const lon = toNum($("manualLon").value);
+    const msg = $("coordMessage");
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      msg.textContent = "กรุณากรอก Latitude ระหว่าง -90 ถึง 90 และ Longitude ระหว่าง -180 ถึง 180";
+      msg.style.color = "#fca5a5";
+      return;
+    }
+    if (state.manualCoordinateLayer) map.removeLayer(state.manualCoordinateLayer);
+    const marker = L.marker([lat, lon]).bindPopup(
+      `<b>พิกัดจากเครื่อง Signt</b><br>Latitude: ${lat.toFixed(6)}<br>Longitude: ${lon.toFixed(6)}<br>รัศมี: 500 เมตร`
+    );
+    const circle = L.circle([lat, lon], {
+      radius: 500, color: "#ffb020", weight: 2.5, opacity: 1,
+      fillColor: "#ffb020", fillOpacity: 0.16
+    }).bindPopup("วงรัศมี 500 เมตร");
+    state.manualCoordinateLayer = L.featureGroup([circle, marker]).addTo(map);
+    marker.openPopup();
+    map.fitBounds(circle.getBounds().pad(0.18), { maxZoom: 17 });
+    msg.textContent = `แสดงพิกัด ${lat.toFixed(6)}, ${lon.toFixed(6)} พร้อมวงรัศมี 500 เมตรแล้ว`;
+    msg.style.color = "#86efac";
+  });
+  $("removeCoordBtn").addEventListener("click", () => {
+    if (state.manualCoordinateLayer) {
+      map.removeLayer(state.manualCoordinateLayer);
+      state.manualCoordinateLayer = null;
+    }
+    $("coordMessage").textContent = "ลบหมุดและวงรัศมีแล้ว";
+    $("coordMessage").style.color = "";
+  });
+  $("techSelect").addEventListener("change", () => {
+    $("statTech").textContent = state.rawRows.length ? ($("techSelect").value === "4G" ? "4G LTE" : "3G UMTS") : "ยังไม่เลือก";
+  });
+
+  // Add minimal label styling after Leaflet creates tooltip elements.
+  const style = document.createElement("style");
+  style.textContent = ".cell-label{background:rgba(5,15,28,.78)!important;border:1px solid rgba(160,190,220,.35)!important;color:#fff!important;box-shadow:none!important;font-size:10px!important;padding:2px 4px!important}.cell-label:before{display:none!important}";
+  document.head.appendChild(style);
+})();
+</script>
+</body>
+</html>
