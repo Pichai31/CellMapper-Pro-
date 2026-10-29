@@ -225,6 +225,65 @@
         ชื่อคอลัมน์อื่นสามารถเลือกเองจากรายการคอลัมน์ได้สำหรับ Cell ID และพิกัด
       </p>
     </section>
+        ```html
+<!-- CSD3 Logo: วางเหนือ Footer ชิดขวา -->
+<div class="csd3-brand">
+  <img
+    src="https://i.postimg.cc/J4pbpG7h/medium-logo-cib-2-2x-1be93f4a36-dc4193cba8.png"
+    alt="CSD3 Logo"
+    class="csd3-image"
+    onerror="this.style.display='none'; this.nextElementSibling.textContent='ไม่สามารถโหลดภาพได้';"
+  />
+
+  <div class="csd3-title">CSD3</div>
+</div>
+
+<style>
+  .csd3-brand {
+    width: 150px;
+    max-width: 35%;
+    margin: 15px 8px 12px auto;
+    text-align: center;
+  }
+
+  .csd3-image {
+    display: block;
+    width: 100%;
+    height: 100px;
+    object-fit: contain;
+    object-position: center;
+    border-radius: 8px;
+  }
+.csd3-title {
+  margin-top: -3px;
+  position: relative;
+  font-family: "Orbitron", "Arial", sans-serif;
+  font-size: 25px;
+  font-weight: 900;
+  letter-spacing: 5px;
+  line-height: 1;
+  color: #38bdf8;
+  text-shadow:
+    0 0 5px rgba(56, 189, 248, 0.8),
+    0 0 14px rgba(14, 165, 233, 0.6);
+}
+
+  @media (max-width: 600px) {
+    .csd3-brand {
+      width: 110px;
+      margin-right: 5px;
+    }
+
+    .csd3-image {
+      height: 75px;
+    }
+
+    .csd3-title {
+      font-size: 19px;
+      letter-spacing: 3px;
+    }
+  }
+</style>
     <footer class="text-center text-xs muted py-4 border-t border-slate-800">
       CellMapper Pro • ประมวลผลในเบราว์เซอร์ • ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปใช้งาน<br />
       ฝ่ายวิเคราะห์ข้อมูล • ชุดปฏิบัติการพิเศษ • ผู้พัฒนา: ส.ต.อ.พิชัย สมปัญญา
