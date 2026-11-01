@@ -37,6 +37,24 @@
     .csd3-title{margin-top:-3px;font-family:Arial,sans-serif;font-size:25px;font-weight:900;letter-spacing:5px;line-height:1;color:#38bdf8;text-shadow:0 0 5px rgba(56,189,248,.8),0 0 14px rgba(14,165,233,.6)}
     @media(max-width:900px){#map{min-height:360px;height:55vh}}
     @media(max-width:600px){.csd3-brand{width:110px;margin-right:5px}.csd3-image{height:75px}.csd3-title{font-size:19px;letter-spacing:3px}}
+
+    /* ===== My Location / GPS Permission (เพิ่มใหม่) ===== */
+    .btn-live-on{background:#0e7a3d!important;border-color:#22c55e!important;color:#fff!important}
+    .gps-modal-backdrop{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(2,8,18,.78);backdrop-filter:blur(3px)}
+    .gps-modal-backdrop.open{display:flex}
+    .gps-modal{width:100%;max-width:440px;max-height:90vh;overflow:auto;background:#0f1d31;border:1px solid #2b4666;border-radius:16px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.6),0 0 0 1px rgba(56,189,248,.15)}
+    .gps-modal-icon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;background:rgba(22,119,232,.18);border:1px solid #2f6fb8;margin-bottom:12px}
+    .gps-modal-icon.warn{background:rgba(239,68,68,.15);border-color:#b04a4a}
+    .gps-modal h3{font-size:1.1rem;font-weight:800;margin-bottom:8px}
+    .gps-modal p,.gps-modal li{font-size:.9rem;line-height:1.55;color:#c3d3e6}
+    .gps-modal ul{list-style:disc;padding-left:1.2rem;margin:8px 0}
+    .gps-modal .brand{font-family:Arial,sans-serif;font-weight:900;letter-spacing:4px;color:#38bdf8;text-shadow:0 0 8px rgba(56,189,248,.6);font-size:.8rem;margin-bottom:10px}
+    .gps-modal-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+    .gps-modal-actions .btn{flex:1;min-width:120px}
+    .gps-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:10001;max-width:92vw;background:#102239;border:1px solid #38516e;color:#e5edf7;padding:10px 16px;border-radius:10px;font-size:.85rem;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+    .gps-toast.show{display:block}
+    .me-pulse{animation:mePulse 1.8s ease-out infinite}
+    @keyframes mePulse{0%{opacity:1}70%{opacity:.35}100%{opacity:1}}
   </style>
 </head>
 <body>
@@ -91,7 +109,7 @@
     </aside>
     <section class="panel p-3 md:p-4 min-w-0">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h2 class="font-bold text-lg">แผนที่วิเคราะห์ Cell</h2><p class="muted text-xs">คลิกพื้นที่หรือชื่อ Cell เพื่อดูรายละเอียด</p></div>
-        <div class="flex gap-2"><button id="fitBtn" class="btn btn-secondary text-sm" disabled>แสดงข้อมูลทั้งหมด</button><button id="baseBtn" class="btn btn-secondary text-sm">เปลี่ยนแผนที่ (มืด)</button></div>
+        <div class="flex flex-wrap gap-2"><button id="myLocationBtn" type="button" class="btn btn-secondary text-sm" title="แสดงตำแหน่งปัจจุบันของฉัน">📍 ตำแหน่งของฉัน</button><button id="trackLiveBtn" type="button" class="btn btn-secondary text-sm" aria-pressed="false" title="ติดตามตำแหน่งแบบเรียลไทม์">🔴 ติดตามสด: ปิด</button><button id="fitBtn" class="btn btn-secondary text-sm" disabled>แสดงข้อมูลทั้งหมด</button><button id="baseBtn" class="btn btn-secondary text-sm">เปลี่ยนแผนที่ (มืด)</button></div>
       </div>
       <div id="map"></div>
 <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs muted">
@@ -103,6 +121,11 @@
   <span>
     <i class="legend-chip" style="background: #32a5ff;"></i>
     พื้นที่ Cell (สีแยกตาม Cell)
+  </span>
+
+  <span>
+    <i class="legend-chip" style="background: #1a73e8; border:2px solid #fff; box-sizing:border-box;"></i>
+    ตำแหน่งของฉัน
   </span>
 
   <span>
@@ -129,6 +152,19 @@
   <div class="csd3-brand"><img src="https://i.postimg.cc/J4pbpG7h/medium-logo-cib-2-2x-1be93f4a36-dc4193cba8.png" alt="CSD3 Logo" class="csd3-image" onerror="this.style.display='none'"><div class="csd3-title">CSD3</div></div>
   <footer class="text-center text-xs muted py-4 border-t border-slate-800">CellMapper Pro • ประมวลผลในเบราว์เซอร์ • ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปใช้งาน<br>ฝ่ายวิเคราะห์ข้อมูล • ชุดปฏิบัติการพิเศษ • ผู้พัฒนา: ส.ต.อ.พิชัย สมปัญญา</footer>
 </main>
+
+<!-- ===== CSD3 GPS Permission Modal (เพิ่มใหม่) ===== -->
+<div id="gpsModalBackdrop" class="gps-modal-backdrop" aria-hidden="true">
+  <div class="gps-modal" role="dialog" aria-modal="true" aria-labelledby="gpsModalTitle">
+    <div class="brand">CSD3</div>
+    <div id="gpsModalIcon" class="gps-modal-icon">📍</div>
+    <h3 id="gpsModalTitle">ขออนุญาตเข้าถึงตำแหน่ง GPS</h3>
+    <div id="gpsModalBody"></div>
+    <div id="gpsModalActions" class="gps-modal-actions"></div>
+  </div>
+</div>
+<div id="gpsToast" class="gps-toast" role="status" aria-live="polite"></div>
+
 <script>
 (() => {
   "use strict";
@@ -380,6 +416,205 @@
     msg.textContent=`แสดงพิกัด ${lat.toFixed(6)}, ${lon.toFixed(6)} พร้อมวงรัศมี 500 เมตรแล้ว`;msg.style.color="#86efac";
   });
   $("removeCoordBtn").addEventListener("click",()=>{if(state.manualCoordinateLayer){map.removeLayer(state.manualCoordinateLayer);state.manualCoordinateLayer=null;}$("coordMessage").textContent="ลบหมุดและวงรัศมีแล้ว";$("coordMessage").style.color="";});
+
+  /* =====================================================================
+     My Location + GPS Permission Popup (CSD3)  — ส่วนที่เพิ่มใหม่
+     - ไม่แก้ไขฟังก์ชันเดิมด้านบน / ไม่ใช้ Google Maps / ไม่ใช้ API Key
+     - Popup นี้เป็นหน้าต่างของ CSD3 เอง; หน้าต่างขอสิทธิ์จริงเบราว์เซอร์เป็นผู้แสดง
+     ===================================================================== */
+  const gps = {
+    permission: "unknown",      // granted | denied | prompt | unknown
+    permStatus: null,
+    layer: null, dot: null, circle: null,
+    watchId: null, tracking: false, firstFix: true, pendingTracking: false,
+    toastTimer: null, lastFocus: null
+  };
+  const GPS_FLAG = "csd3_gps_granted";
+  const GEO_OPTS = { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 };
+
+  function flagGet(){ try { return localStorage.getItem(GPS_FLAG) === "1"; } catch (e) { return false; } }
+  function flagSet(v){ try { if (v) localStorage.setItem(GPS_FLAG, "1"); else localStorage.removeItem(GPS_FLAG); } catch (e) { /* ignore */ } }
+
+  function gpsToast(text, ms = 3500){
+    const t = $("gpsToast"); t.textContent = text; t.classList.add("show");
+    clearTimeout(gps.toastTimer); gps.toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+  }
+
+  /* ---------- Modal ---------- */
+  function closeGpsModal(){
+    const b = $("gpsModalBackdrop"); b.classList.remove("open"); b.setAttribute("aria-hidden", "true");
+    if (gps.lastFocus && gps.lastFocus.focus) { try { gps.lastFocus.focus(); } catch (e) {} }
+  }
+  function openGpsModal({icon = "📍", warn = false, title, bodyHtml, actions}){
+    gps.lastFocus = document.activeElement;
+    $("gpsModalIcon").textContent = icon; $("gpsModalIcon").classList.toggle("warn", !!warn);
+    $("gpsModalTitle").textContent = title; $("gpsModalBody").innerHTML = bodyHtml;
+    const box = $("gpsModalActions"); box.innerHTML = "";
+    actions.forEach(a => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "btn " + (a.primary ? "btn-primary" : "btn-secondary"); btn.textContent = a.label;
+      btn.addEventListener("click", () => { closeGpsModal(); if (a.onClick) a.onClick(); });
+      box.appendChild(btn);
+    });
+    const b = $("gpsModalBackdrop"); b.classList.add("open"); b.setAttribute("aria-hidden", "false");
+    const first = box.querySelector(".btn-primary") || box.querySelector("button"); if (first) first.focus();
+  }
+  $("gpsModalBackdrop").addEventListener("click", e => { if (e.target === $("gpsModalBackdrop")) closeGpsModal(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && $("gpsModalBackdrop").classList.contains("open")) closeGpsModal(); });
+
+  function showConsentModal(){
+    openGpsModal({
+      icon: "📍", title: "ขออนุญาตเข้าถึงตำแหน่ง GPS",
+      bodyHtml: "<p>ระบบต้องการเข้าถึงตำแหน่ง GPS ของอุปกรณ์ เพื่อแสดงตำแหน่งปัจจุบันบนแผนที่</p><p class='muted' style='margin-top:8px;font-size:.8rem'>เมื่อกดอนุญาต เบราว์เซอร์จะแสดงหน้าต่างขอสิทธิ์ Location อีกครั้ง กรุณากด “อนุญาต / Allow” ด้วยตัวเอง ตำแหน่งจะถูกใช้บนเครื่องนี้เท่านั้นและไม่ถูกอัปโหลด</p>",
+      actions: [
+        { label: "ยกเลิก", onClick: () => { gps.pendingTracking = false; gpsToast("ยกเลิกการเข้าถึง GPS"); } },
+        { label: "อนุญาตให้เข้าถึง GPS", primary: true, onClick: requestLocationFromBrowser }
+      ]
+    });
+  }
+  function showDeniedModal(){
+    gps.pendingTracking = false;
+    openGpsModal({
+      icon: "🚫", warn: true, title: "การเข้าถึงตำแหน่งถูกปฏิเสธ",
+      bodyHtml: "<p>เบราว์เซอร์ถูกตั้งค่าไม่ให้เว็บไซต์นี้เข้าถึงตำแหน่ง กรุณาเปิดสิทธิ์ Location แล้วกดปุ่มอีกครั้ง</p>" +
+        "<ul>" +
+        "<li><b>Chrome (คอมพิวเตอร์):</b> กดไอคอนรูปแม่กุญแจ/ปรับแต่งข้างช่องที่อยู่เว็บ → การตั้งค่าเว็บไซต์ → ตำแหน่ง → อนุญาต แล้วโหลดหน้าใหม่</li>" +
+        "<li><b>Chrome (Android):</b> แตะไอคอนแม่กุญแจข้างที่อยู่เว็บ → สิทธิ์ → ตำแหน่ง → อนุญาต</li>" +
+        "<li><b>Safari (iPhone/iPad):</b> ตั้งค่า → ความเป็นส่วนตัวและความปลอดภัย → บริการหาตำแหน่ง → เปิด และเลือก Safari เว็บไซต์ → “ขณะใช้แอป” หรือ แตะ “ aA ” ในแถบที่อยู่ → การตั้งค่าเว็บไซต์ → ตำแหน่ง → อนุญาต</li>" +
+        "<li><b>Safari (Mac):</b> Safari → การตั้งค่า → เว็บไซต์ → ตำแหน่ง → เลือก “อนุญาต” สำหรับเว็บไซต์นี้</li>" +
+        "</ul>",
+      actions: [{ label: "ปิด" }, { label: "ลองอีกครั้ง", primary: true, onClick: handleMyLocation }]
+    });
+  }
+  function showErrorModal(title, text){
+    openGpsModal({ icon: "⚠️", warn: true, title, bodyHtml: `<p>${escapeHtml(text)}</p>`, actions: [{ label: "ปิด" }, { label: "ลองอีกครั้ง", primary: true, onClick: handleMyLocation }] });
+  }
+
+  /* ---------- Permission state ---------- */
+  async function queryPermission(){
+    if (!navigator.permissions || !navigator.permissions.query) return "unknown"; // fallback: เบราว์เซอร์ไม่รองรับ Permissions API
+    try {
+      const status = await navigator.permissions.query({ name: "geolocation" });
+      if (gps.permStatus !== status) {
+        gps.permStatus = status;
+        status.onchange = () => {
+          gps.permission = status.state;
+          if (status.state === "granted") flagSet(true);
+          if (status.state === "denied") { flagSet(false); if (gps.tracking) stopTracking(true); }
+        };
+      }
+      gps.permission = status.state; return status.state;
+    } catch (e) { return "unknown"; }
+  }
+
+  /* ---------- Drawing ---------- */
+  function drawMyLocation(pos, recenter){
+    const { latitude: lat, longitude: lon, accuracy } = pos.coords, ll = [lat, lon], acc = Math.max(Number(accuracy) || 0, 1);
+    if (!gps.layer) {
+      gps.circle = L.circle(ll, { radius: acc, color: "#1a73e8", weight: 1.5, opacity: .8, fillColor: "#1a73e8", fillOpacity: .15, interactive: false });
+      gps.dot = L.circleMarker(ll, { radius: 8, color: "#ffffff", weight: 3, fillColor: "#1a73e8", fillOpacity: 1 });
+      gps.dot.bindPopup("");
+      gps.layer = L.featureGroup([gps.circle, gps.dot]).addTo(map);
+    } else {
+      gps.circle.setLatLng(ll); gps.circle.setRadius(acc); gps.dot.setLatLng(ll);
+      if (!map.hasLayer(gps.layer)) gps.layer.addTo(map);
+    }
+    gps.dot.setPopupContent(`<b>ตำแหน่งของฉัน</b><br>Latitude: ${lat.toFixed(6)}<br>Longitude: ${lon.toFixed(6)}<br>ความแม่นยำ: ±${Math.round(acc)} เมตร${gps.tracking ? "<br><span style='color:#86efac'>● กำลังติดตามสด</span>" : ""}`);
+    if (recenter) {
+      const b = gps.circle.getBounds();
+      if (b.isValid() && acc > 5) map.fitBounds(b.pad(.5), { maxZoom: 18 }); else map.setView(ll, 17);
+    }
+  }
+
+  /* ---------- Error handling ---------- */
+  function handleGeoError(err, fromWatch){
+    if (err && err.code === 1) { // PERMISSION_DENIED
+      gps.permission = "denied"; flagSet(false);
+      if (gps.tracking) stopTracking(true);
+      showDeniedModal();
+    } else if (err && err.code === 2) {
+      if (!fromWatch) showErrorModal("ไม่พบตำแหน่งของอุปกรณ์", "ไม่สามารถระบุตำแหน่งได้ในขณะนี้ กรุณาตรวจสอบว่าเปิด GPS/บริการหาตำแหน่งของอุปกรณ์แล้ว และอยู่ในพื้นที่ที่รับสัญญาณได้");
+      else gpsToast("สัญญาณ GPS ไม่เสถียร กำลังรอข้อมูลใหม่...");
+    } else if (err && err.code === 3) {
+      if (!fromWatch) showErrorModal("หมดเวลาในการค้นหาตำแหน่ง", "ระบบรอรับตำแหน่งนานเกินไป กรุณาลองใหม่ในที่โล่งหรือตรวจสอบสัญญาณ GPS");
+      else gpsToast("หมดเวลารับตำแหน่ง กำลังลองใหม่...");
+    } else {
+      showErrorModal("เกิดข้อผิดพลาด", (err && err.message) || "ไม่สามารถอ่านตำแหน่งได้");
+    }
+    updateTrackButton();
+  }
+
+  /* ---------- เรียกหน้าต่างขอสิทธิ์จริงของเบราว์เซอร์ ---------- */
+  function requestLocationFromBrowser(){
+    gpsToast("กำลังค้นหาตำแหน่ง... กรุณากด “อนุญาต” ในหน้าต่างของเบราว์เซอร์", 6000);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        gps.permission = "granted"; flagSet(true); gps.toastTimer && clearTimeout(gps.toastTimer); $("gpsToast").classList.remove("show");
+        drawMyLocation(pos, true);
+        setStatus("แสดงตำแหน่งปัจจุบันแล้ว");
+        if (gps.pendingTracking) { gps.pendingTracking = false; startWatch(); }
+      },
+      err => { gps.pendingTracking = false; handleGeoError(err, false); },
+      GEO_OPTS
+    );
+  }
+
+  /* ---------- Entry point: ปุ่ม My Location ---------- */
+  async function ensurePermissionThen(proceedGranted){
+    if (!("geolocation" in navigator)) {
+      showErrorModal("เบราว์เซอร์ไม่รองรับ GPS", "อุปกรณ์หรือเบราว์เซอร์นี้ไม่รองรับ Geolocation กรุณาใช้ Safari หรือ Chrome รุ่นล่าสุด"); return;
+    }
+    if (!window.isSecureContext) {
+      openGpsModal({ icon: "🔒", warn: true, title: "ต้องใช้งานผ่าน HTTPS", bodyHtml: "<p>เบราว์เซอร์อนุญาตให้ใช้ GPS เฉพาะหน้าเว็บที่เปิดผ่าน <b>HTTPS</b> หรือ <b>localhost</b> เท่านั้น กรุณาเปิดเว็บไซต์ผ่านที่อยู่ที่ขึ้นต้นด้วย https://</p>", actions: [{ label: "ปิด", primary: true }] }); return;
+    }
+    const perm = await queryPermission();
+    if (perm === "granted") { proceedGranted(); return; }
+    if (perm === "denied") { showDeniedModal(); return; }
+    if (perm === "unknown" && flagGet()) { proceedGranted(); return; } // ไม่มี Permissions API แต่เคยอนุญาตแล้ว
+    showConsentModal();                                                 // prompt หรือไม่ทราบสถานะ
+  }
+  function handleMyLocation(){
+    gps.pendingTracking = false;
+    ensurePermissionThen(requestLocationFromBrowser);
+  }
+
+  /* ---------- Real-time tracking ---------- */
+  function updateTrackButton(){
+    const b = $("trackLiveBtn"); b.textContent = gps.tracking ? "🟢 ติดตามสด: เปิด" : "🔴 ติดตามสด: ปิด";
+    b.classList.toggle("btn-live-on", gps.tracking); b.setAttribute("aria-pressed", gps.tracking ? "true" : "false");
+  }
+  function startWatch(){
+    if (gps.watchId !== null) return;
+    gps.tracking = true; gps.firstFix = true; updateTrackButton();
+    gps.watchId = navigator.geolocation.watchPosition(
+      pos => {
+        gps.permission = "granted"; flagSet(true);
+        drawMyLocation(pos, gps.firstFix);
+        if (!gps.firstFix) map.panTo([pos.coords.latitude, pos.coords.longitude], { animate: true });
+        gps.firstFix = false;
+        setStatus("ติดตามตำแหน่งสด");
+      },
+      err => handleGeoError(err, true),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
+    );
+    gpsToast("เริ่มติดตามตำแหน่งแบบเรียลไทม์");
+  }
+  function stopTracking(silent){
+    if (gps.watchId !== null) { navigator.geolocation.clearWatch(gps.watchId); gps.watchId = null; }
+    const was = gps.tracking; gps.tracking = false; updateTrackButton();
+    if (was && !silent) { gpsToast("หยุดติดตามตำแหน่งสด"); setStatus("หยุดติดตามตำแหน่ง"); }
+  }
+  function handleTrackToggle(){
+    if (gps.tracking) { stopTracking(false); return; }
+    // ถ้าต้องผ่าน Popup ขออนุญาต จะเริ่ม watch ต่อหลังผู้ใช้อนุญาต (pendingTracking)
+    gps.pendingTracking = true;
+    ensurePermissionThen(() => { gps.pendingTracking = false; startWatch(); });
+  }
+
+  $("myLocationBtn").addEventListener("click", handleMyLocation);
+  $("trackLiveBtn").addEventListener("click", handleTrackToggle);
+  window.addEventListener("pagehide", () => stopTracking(true));
+  queryPermission(); // อ่านสถานะล่วงหน้า (ไม่เรียกขอสิทธิ์) เพื่อเก็บ listener การเปลี่ยนสิทธิ์
 })();
 </script>
 </body>
