@@ -328,7 +328,20 @@
     }
     return rows;
   }
+  function sniff(buf, ext) {                       // ตรวจจากเนื้อไฟล์ (signature) ไม่เชื่อ MIME/นามสกุลอย่างเดียว
+    const u = new Uint8Array(buf, 0, Math.min(8, buf.byteLength || 0));
+    if (u[0] === 0x50 && u[1] === 0x4B && (u[2] === 3 || u[2] === 5)) return "xlsx";
+    if (u[0] === 0xD0 && u[1] === 0xCF && u[2] === 0x11 && u[3] === 0xE0) return "xls";
+    return "text";
+  }
+  function pickHeader(table) {
+    let idx = 0, best = 0;
+    table.slice(0, 30).forEach((r, i) => { const s = r.filter(c => KNOWN.has(nk(c))).length; if (s > best) { best = s; idx = i; } });
+    if (best < 2) idx = 0;
+    return { table: table.slice(idx), score: best, skipped: idx };
+  }
   function analyzeBuffer(buf) {
+    if (sniff(buf) !== "text") return { isGMon: false, binary: true };
     const { text, encoding } = decodeBuffer(buf);
     if (!text.trim()) return { isGMon: false };
     const { table, delimiter } = parseText(text);
@@ -373,6 +386,7 @@
       result = { isGMon: false };
     }
 
+    if (result.binary) { refire(); return; } // Excel ที่ไม่มีนามสกุล .xlsx/.xls -> ส่งให้ตัวอ่าน Excel เดิม
     if (!result.isGMon) { window.CSDImportPending = result.text ? { name: file.name, text: result.text, encoding: result.encoding, delimiter: result.delimiter } : null; refire(); return; } // normal CellMapper CSV -> original behaviour
 
     window.CSDImportPending = { name: file.name, text: result.csv, encoding: result.encoding, delimiter: result.delimiter, gmon: true };
@@ -398,7 +412,7 @@
   }, true);
 
   window.GMonProConverter = { analyzeBuffer };
-  window.CSDCsv = { decodeBuffer, parseText, toObjects, detectDelimiter }; // namespaced, read-only helper
+  window.CSDCsv = { sniff, pickHeader, decodeBuffer, parseText, toObjects, detectDelimiter }; // namespaced, read-only helper
 })();
 
 </script>
@@ -483,31 +497,56 @@
   }
   async function parseFile(file){
     state.fileName=file.name;state.analysisDone=false;state.importInfo=null;
-    $("fileMessage").textContent=`กำลังอ่านไฟล์ ${file.name}...`;
+    $("fileMessage").textContent=`กำลังอ่านไฟล์ ${file.name}...`;setStatus("กำลังอ่านไฟล์...");await new Promise(r=>setTimeout(r,30));
     try{
       let rows=[];const ext=file.name.split(".").pop().toLowerCase();
-      if(ext!=="xlsx"&&ext!=="xls"){
+      const pend0=window.CSDImportPending;let buf=null,kind="text";
+      if(!(pend0&&pend0.name===file.name)){buf=file.arrayBuffer?await file.arrayBuffer():await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(fr.error);fr.readAsArrayBuffer(file);});
+        kind=window.CSDCsv?window.CSDCsv.sniff(buf,ext):(ext==="xlsx"||ext==="xls"?ext:"text");}
+      if(kind==="text"){
         const E=window.CSDCsv,pend=window.CSDImportPending;window.CSDImportPending=null;
         let text,info={};
         if(pend&&pend.name===file.name){text=pend.text;info={encoding:pend.encoding};}
-        else if(E){const d=E.decodeBuffer(await file.arrayBuffer());text=d.text;info={encoding:d.encoding};}
+        else if(E){const d=E.decodeBuffer(buf);text=d.text;info={encoding:d.encoding};}
         else text=await file.text();
         if(E){const p=E.parseText(text);rows=E.toObjects(p.table);info.delimiter=p.delimiter;info.total=Math.max(0,p.table.length-1);}
         else{rows=Papa.parse(text,{header:true,skipEmptyLines:"greedy",dynamicTyping:false}).data;info.total=rows.length;}
-        state.importInfo=info;
+        info.type="CSV";state.importInfo=info;
         $("sheetSelect").innerHTML="<option>ไฟล์ CSV ไม่มีแผ่นงาน</option>";$("sheetSelect").disabled=true;
-      }else if(ext==="xlsx"||ext==="xls"){
-        state.workbook=XLSX.read(await file.arrayBuffer(),{type:"array",cellDates:false});
+      }else if(kind==="xlsx"||kind==="xls"){
+        if(typeof XLSX==="undefined")throw new Error("ไม่พบไลบรารี Excel (SheetJS) — ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
+        try{state.workbook=XLSX.read(buf,{type:"array",cellDates:false});}catch(e){throw new Error("อ่านไฟล์ Excel ไม่ได้ (ไฟล์อาจเสียหรือมีรหัสผ่าน): "+e.message);}
+        state.sheetCache={};state.excelType=kind.toUpperCase();
         state.sheetNames=state.workbook.SheetNames||[];
         $("sheetSelect").innerHTML="";
-        state.sheetNames.forEach((name,i)=>{const opt=document.createElement("option");opt.value=name;opt.textContent=name;if(i===0)opt.selected=true;$("sheetSelect").appendChild(opt);});
+        let bestName=state.sheetNames[0],bestKey=[-1,-1];
+        state.sheetNames.forEach(name=>{const s=sheetData(name);const key=[s.score,s.total];if(key[0]>bestKey[0]||(key[0]===bestKey[0]&&key[1]>bestKey[1])){bestKey=key;bestName=name;}});
+        state.sheetNames.forEach(name=>{const opt=document.createElement("option");opt.value=name;opt.textContent=`${name} (${sheetData(name).total.toLocaleString()} แถว)`;if(name===bestName)opt.selected=true;$("sheetSelect").appendChild(opt);});
         $("sheetSelect").disabled=state.sheetNames.length===0;
-        rows=readWorkbookSheet(state.sheetNames[0]);
-      }else throw new Error("รองรับเฉพาะไฟล์ CSV, XLS และ XLSX");
+        rows=readWorkbookSheet(bestName);
+      }else throw new Error("ไม่รู้จักรูปแบบไฟล์ (รองรับ CSV, XLS, XLSX)");
       loadRows(rows);
     }catch(err){$("fileMessage").textContent=`อ่านไฟล์ไม่สำเร็จ: ${err.message}`;setStatus("เกิดข้อผิดพลาด");$("analyzeBtn").disabled=true;console.error(err);}
   }
-  function readWorkbookSheet(name){if(!state.workbook||!name)return[];return XLSX.utils.sheet_to_json(state.workbook.Sheets[name],{defval:"",raw:false});}
+  function sheetData(name){
+    state.sheetCache=state.sheetCache||{};if(state.sheetCache[name])return state.sheetCache[name];
+    const empty={rows:[],score:0,total:0},ws=state.workbook&&state.workbook.Sheets[name];
+    if(!ws||!window.CSDCsv)return(state.sheetCache[name]=empty);
+    const raw=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:"",blankrows:false}),fmt=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:"",blankrows:false});
+    // ค่าตัวเลข: ใช้ค่าจริงเต็มความละเอียด (ไม่ถูกปัดตามรูปแบบเซลล์/ไม่เป็น 1.2E+11) ส่วนวันที่/เวลา/ข้อความ ใช้ข้อความที่แสดงในเซลล์
+    const table=raw.map((r,i)=>r.map((v,j)=>{const f=(fmt[i]||[])[j];
+      if(typeof v==="number"){const ft=String(f??"").replace(/,/g,"").trim();return /^-?\d*\.?\d+(e[+-]?\d+)?$/i.test(ft)?String(v):String(f??v);}
+      return String(v??"");}));
+    const nonEmpty=table.filter(r=>r.some(c=>String(c).trim()!==""));
+    if(!nonEmpty.length)return(state.sheetCache[name]=empty);
+    const p=window.CSDCsv.pickHeader(nonEmpty);
+    return(state.sheetCache[name]={rows:window.CSDCsv.toObjects(p.table),score:p.score,total:Math.max(0,p.table.length-1)});
+  }
+  function readWorkbookSheet(name){
+    if(!state.workbook||!name)return[];
+    if(!window.CSDCsv)return XLSX.utils.sheet_to_json(state.workbook.Sheets[name],{defval:"",raw:false});
+    const s=sheetData(name);state.importInfo={type:state.excelType||"XLSX",total:s.total,sheet:name};return s.rows;
+  }
   function loadRows(rows){
     state.rawRows=rows.filter(r=>r&&Object.keys(r).some(k=>String(r[k]??"").trim()!==""));
     state.headers=state.rawRows.length?Object.keys(state.rawRows[0]):[];
@@ -516,6 +555,14 @@
     {const miss=[["Cell ID","cellColumn"],["Latitude","latColumn"],["Longitude","lonColumn"]].filter(x=>state.rawRows.length&&!$(x[1]).value).map(x=>x[0]);
      const inf=state.importInfo;if(inf&&inf.delimiter)$("fileMessage").textContent+=` • ตัวคั่น ${inf.delimiter==="\t"?"TAB":inf.delimiter} • ${inf.encoding||""}`;
      if(miss.length)$("fileMessage").textContent+=` • ⚠ ไม่พบคอลัมน์: ${miss.join(", ")} (เลือกเองจากรายการ)`;}
+    {const inf=state.importInfo||{},c=$("cellColumn").value,la=$("latColumn").value,lo=$("lonColumn").value;
+     if(inf.type)$("fileMessage").textContent+=` • ประเภท ${inf.type}${inf.sheet?" (แผ่นงาน: "+inf.sheet+")":""}`;
+     if(state.rawRows.length&&c&&la&&lo){const ids=new Set();let hc=0,nm=0,ok=0,pass=0;
+       for(const r of state.rawRows){const id=String(r[c]??"").trim(),a=toNum(r[la],true),b=toNum(r[lo],true),n=Number.isFinite(a)&&Number.isFinite(b),g=n&&Math.abs(a)<=90&&Math.abs(b)<=180;
+         if(id){hc++;ids.add(id);}if(n)nm++;if(g)ok++;if(id&&g)pass++;}
+       const R=state.rawRows.length;
+       $("fileMessage").textContent+=` • แถวทั้งหมด ${(inf.total||R).toLocaleString()} • นำเข้าได้ ${pass.toLocaleString()} • ไม่ผ่าน ${(R-pass).toLocaleString()} • Cell ID ที่พบ ${ids.size.toLocaleString()} • พิกัดถูกต้อง ${ok.toLocaleString()}`
+         +((R-pass)?` • สาเหตุ: ไม่มี Cell ID ${R-hc}, พิกัดไม่ใช่ตัวเลข ${R-nm}, พิกัดนอกช่วง ${nm-ok}`:"");}}
     setStatus(state.rawRows.length?"นำเข้าข้อมูลแล้ว":"ไม่มีข้อมูล");
     $("statPoints").textContent="0";$("statCells").textContent="0";$("statValid").textContent="0";
     $("statTech").textContent=state.rawRows.length?($("techSelect").value==="4G"?"4G LTE":"3G UMTS"):"ยังไม่เลือก";
