@@ -539,13 +539,25 @@
       return String(v??"");}));
     const nonEmpty=table.filter(r=>r.some(c=>String(c).trim()!==""));
     if(!nonEmpty.length)return(state.sheetCache[name]=empty);
-    const p=window.CSDCsv.pickHeader(nonEmpty);
-    return(state.sheetCache[name]={rows:window.CSDCsv.toObjects(p.table),score:p.score,total:Math.max(0,p.table.length-1)});
+    const E=window.CSDCsv;let tbl=E.pickHeader(nonEmpty).table,rebuilt="",tech="",gmon=false,error="";
+    // กรณี "ไฟล์ CSV ถูกวางลง Excel ทั้งบรรทัดในเซลล์เดียว" (เช่น PLMN;SYSTEM;XCI;... อยู่ใน A1) และค่าที่มี "," ถูกแยกไปคอลัมน์ B:
+    // กู้บรรทัดเดิมโดยต่อเซลล์ด้วย "," แล้วแยกคอลัมน์ใหม่ด้วยตัวคั่นที่ตรวจพบ
+    if(E.pickHeader(nonEmpty).score<2){
+      for(const d of [";","\t","|"]){
+        const hit=nonEmpty.filter(r=>String(r[0]).split(d).length>=4).length;
+        if(hit>=Math.max(2,nonEmpty.length*0.6)){
+          try{const lines=nonEmpty.map(r=>{const c=r.map(x=>String(x));while(c.length&&c[c.length-1].trim()==="")c.pop();return c.join(",");});
+            const pt=E.parseText(lines.join("\n"));tbl=pt.table;rebuilt=pt.delimiter;}catch(e){error=e.message;}
+          break;}}}
+    // ไฟล์ G-Mon Pro (ใน Excel หรือไม่ก็ตาม): ใช้ตัวแปลงเดิมตัวเดียวกับ CSV เพื่อให้ RSRP/RSCP, TA, 3G/4G ถูกแมปเหมือนกัน
+    try{const g=window.GMonProConverter;if(g&&tbl[0]&&tbl[0].length>=3){const r=g.analyzeBuffer(new TextEncoder().encode(Papa.unparse(tbl)).buffer);if(r&&r.isGMon){tbl=E.parseText(r.csv).table;tech=r.tech;gmon=true;}}}catch(e){error=e.message;}
+    return(state.sheetCache[name]={rows:E.toObjects(tbl),score:E.pickHeader(tbl).score,total:Math.max(0,tbl.length-1),tech,gmon,rebuilt,error});
   }
   function readWorkbookSheet(name){
     if(!state.workbook||!name)return[];
     if(!window.CSDCsv)return XLSX.utils.sheet_to_json(state.workbook.Sheets[name],{defval:"",raw:false});
-    const s=sheetData(name);state.importInfo={type:state.excelType||"XLSX",total:s.total,sheet:name};return s.rows;
+    const s=sheetData(name);state.importInfo={type:state.excelType||"XLSX",total:s.total,sheet:name,delimiter:s.rebuilt||"",rebuilt:!!s.rebuilt,gmon:s.gmon,error:s.error};
+    if(s.tech&&$("techSelect"))$("techSelect").value=s.tech;return s.rows;
   }
   function loadRows(rows){
     state.rawRows=rows.filter(r=>r&&Object.keys(r).some(k=>String(r[k]??"").trim()!==""));
@@ -563,6 +575,12 @@
        const R=state.rawRows.length;
        $("fileMessage").textContent+=` • แถวทั้งหมด ${(inf.total||R).toLocaleString()} • นำเข้าได้ ${pass.toLocaleString()} • ไม่ผ่าน ${(R-pass).toLocaleString()} • Cell ID ที่พบ ${ids.size.toLocaleString()} • พิกัดถูกต้อง ${ok.toLocaleString()}`
          +((R-pass)?` • สาเหตุ: ไม่มี Cell ID ${R-hc}, พิกัดไม่ใช่ตัวเลข ${R-nm}, พิกัดนอกช่วง ${nm-ok}`:"");}}
+    {const inf=state.importInfo||{},c=$("cellColumn").value,la=$("latColumn").value,lo=$("lonColumn").value,m=$("fileMessage");
+     if(inf.rebuilt)m.textContent+=" • ⚙ ไฟล์ Excel เก็บทั้งบรรทัดไว้ในเซลล์เดียว (รูปแบบ CSV ที่วางลง Excel) — กู้คอลัมน์ด้วยตัวคั่นแล้ว";
+     if(inf.gmon||(window.CSDCsv&&inf.encoding&&state.rawRows[0]&&"SITE_ID" in state.rawRows[0]))m.textContent+=" • แปลงจาก G-Mon Pro อัตโนมัติ";
+     if(inf.error)m.textContent+=` • ⚠ ${inf.error}`;
+     if(state.rawRows.length&&c&&la&&lo){const s=state.rawRows.find(r=>{const a=toNum(r[la],true),b=toNum(r[lo],true);return Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a)<=90&&Math.abs(b)<=180;});
+       m.textContent+=` • คอลัมน์ที่จับคู่: Cell ID="${c}", Lat="${la}", Lon="${lo}"`+(s?` • ตัวอย่าง LAT/LON: ${String(s[la]).trim()}, ${String(s[lo]).trim()}`:` • ตัวอย่างค่าแถวแรก LAT/LON: "${String(state.rawRows[0][la]??"").slice(0,20)}", "${String(state.rawRows[0][lo]??"").slice(0,20)}"`);}}
     setStatus(state.rawRows.length?"นำเข้าข้อมูลแล้ว":"ไม่มีข้อมูล");
     $("statPoints").textContent="0";$("statCells").textContent="0";$("statValid").textContent="0";
     $("statTech").textContent=state.rawRows.length?($("techSelect").value==="4G"?"4G LTE":"3G UMTS"):"ยังไม่เลือก";
