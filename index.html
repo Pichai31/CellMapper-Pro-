@@ -109,7 +109,7 @@
     </aside>
     <section class="panel p-3 md:p-4 min-w-0">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h2 class="font-bold text-lg">แผนที่วิเคราะห์ Cell</h2><p class="muted text-xs">คลิกพื้นที่หรือชื่อ Cell เพื่อดูรายละเอียด</p></div>
-        <div class="flex flex-wrap gap-2"><button id="myLocationBtn" type="button" class="btn btn-secondary text-sm" title="แสดงตำแหน่งปัจจุบันของฉัน">📍 ตำแหน่งของฉัน</button><button id="trackLiveBtn" type="button" class="btn btn-secondary text-sm" aria-pressed="false" title="ติดตามตำแหน่งแบบเรียลไทม์">🔴 ติดตามสด: ปิด</button><button id="fitBtn" class="btn btn-secondary text-sm" disabled>แสดงข้อมูลทั้งหมด</button><button id="baseBtn" class="btn btn-secondary text-sm">เปลี่ยนแผนที่ (มืด)</button></div>
+        <div class="flex flex-wrap gap-2"><button id="myLocationBtn" type="button" class="btn btn-secondary text-sm" title="แสดงตำแหน่งปัจจุบันของฉัน">📍 ตำแหน่งของฉัน</button><button id="trackLiveBtn" type="button" class="btn btn-secondary text-sm" aria-pressed="false" title="ติดตามตำแหน่งแบบเรียลไทม์">🔴 ติดตามสด: ปิด</button><button id="fitBtn" class="btn btn-secondary text-sm" disabled>แสดงข้อมูลทั้งหมด</button><button id="baseBtn" class="btn btn-secondary text-sm">เปลี่ยนแผนที่ (ถนน)</button></div>
       </div>
       <div id="map"></div>
 <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs muted">
@@ -165,6 +165,208 @@
 </div>
 <div id="gpsToast" class="gps-toast" role="status" aria-live="polite"></div>
 
+<!-- ===== G-Mon Pro Auto CSV Conversion Add-on (เพิ่มใหม่) ===== -->
+<script>
+/*!
+ * G-Mon Pro Auto CSV Conversion Add-on for CellMapper Pro / CSD3
+ * ---------------------------------------------------------------
+ * Independent module. Does NOT modify or override any existing function.
+ * Only integration point: a capture-phase "change" listener on #fileInput.
+ *
+ *   #fileInput change
+ *     -> [this add-on] detect G-Mon Pro CSV
+ *          yes -> convert -> replace input.files with converted CSV -> re-fire "change"
+ *                 (original parseFile / loadRows / analyze run unchanged)
+ *          no  -> re-fire "change" untouched (original behaviour)
+ *          G-Mon but invalid -> show error, original engine is NEVER called
+ *
+ * Requires: PapaParse (already loaded by CellMapper Pro).
+ * Must be placed BEFORE the main CellMapper <script>.
+ */
+(() => {
+  "use strict";
+  const input = document.getElementById("fileInput");
+  if (!input || typeof Papa === "undefined") return;
+
+  let bypass = false; // true only while this add-on re-fires "change"
+
+  class GMonError extends Error {}
+
+  const key = s => String(s ?? "").replace(/^\uFEFF/, "").trim().toUpperCase();
+
+  /* ---------- 1) Encoding detection ---------- */
+  function decodeBuffer(buf) {
+    const u8 = new Uint8Array(buf);
+    if (!u8.length) return { text: "", encoding: "empty" };
+    if (u8[0] === 0xFF && u8[1] === 0xFE) return { text: new TextDecoder("utf-16le").decode(u8), encoding: "UTF-16LE" };
+    if (u8[0] === 0xFE && u8[1] === 0xFF) return { text: new TextDecoder("utf-16be").decode(u8), encoding: "UTF-16BE" };
+    const sample = u8.subarray(0, 4096);
+    for (let i = 0; i < sample.length; i++) {
+      if (sample[i] === 0) throw new GMonError("ไฟล์ไม่ใช่ไฟล์ข้อความ CSV (พบข้อมูลไบนารี)");
+    }
+    try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(u8), encoding: "UTF-8" }; } catch (_) {}
+    for (const enc of ["windows-874", "windows-1252"]) {
+      try { return { text: new TextDecoder(enc).decode(u8), encoding: enc }; } catch (_) {}
+    }
+    throw new GMonError("ไม่สามารถตรวจจับ Encoding ของไฟล์ได้");
+  }
+
+  /* ---------- 2) Delimiter detection ---------- */
+  function detectDelimiter(text) {
+    const line = text.replace(/^\uFEFF/, "").split(/\r?\n/).find(l => l.trim() !== "") || "";
+    let best = ",", bestN = 0;
+    for (const d of [";", ",", "\t", "|"]) {
+      let n = 0, q = false;
+      for (const ch of line) { if (ch === '"') q = !q; else if (ch === d && !q) n++; }
+      if (n > bestN) { best = d; bestN = n; }
+    }
+    return best;
+  }
+
+  /* ---------- 3) G-Mon Pro signature ---------- */
+  const MARKERS = ["PLMN", "XNBID", "LOCAL_CID", "LAC/TAC", "PCI/PSC/BSIC", "ARFCN", "BAND",
+                   "RSRP/RSCP", "RSRQ/ECIO", "SNR", "CLF_LABEL", "GPS_ACCURACY"];
+  function looksLikeGMon(keys) {
+    if (!keys.includes("XCI") || !keys.includes("SYSTEM")) return false;
+    return MARKERS.filter(m => keys.includes(m)).length >= 4;
+  }
+
+  /* ---------- helpers ---------- */
+  const fixNum = v => {
+    const s = String(v ?? "").trim();
+    return /^-?\d+,\d+$/.test(s) ? s.replace(",", ".") : s; // decimal comma -> dot
+  };
+  const techOf = v => {
+    const s = String(v ?? "").trim().toUpperCase();
+    if (s === "4" || /LTE|4G/.test(s)) return "4G";
+    if (s === "3" || /UMTS|WCDMA|3G/.test(s)) return "3G";
+    return "";
+  };
+
+  /* ---------- 4) Convert to CellMapper Pro standard columns ---------- */
+  const OUT = ["PLMN", "SYSTEM", "XCI", "SITE_ID", "LOCAL_ID", "LAC/TAC", "PCI/PSC/BSIC", "EARFCN", "UARFCN",
+               "BAND", "RSSI", "RSRP", "RSRQ", "SINR", "RSCP", "Ec/No", "TA", "LAT", "LON", "SPEED",
+               "GPS_ACCURACY", "DATE", "TIME"];
+
+  function convertRows(headers, data) {
+    const keys = headers.map(key);
+    const ix = n => keys.indexOf(n);
+    const miss = ["XCI", "LAT", "LON"].filter(n => ix(n) < 0);
+    if (miss.length) throw new GMonError("ไฟล์ G-Mon Pro ไม่มีคอลัมน์ที่จำเป็น: " + miss.join(", "));
+
+    const g = (row, n) => { const i = ix(n); return i < 0 ? "" : String(row[i] ?? "").trim(); };
+    const out = [], counts = { "4G": 0, "3G": 0 };
+    let valid = 0;
+
+    for (const row of data) {
+      if (!row || row.every(c => String(c ?? "").trim() === "")) continue;
+      const tech = techOf(g(row, "SYSTEM"));
+      if (tech) counts[tech]++;
+      const lvl = fixNum(g(row, "RSRP/RSCP")), q = fixNum(g(row, "RSRQ/ECIO")), ar = g(row, "ARFCN");
+      const is3 = tech === "3G";
+      const o = {
+        "PLMN": g(row, "PLMN"), "SYSTEM": g(row, "SYSTEM"), "XCI": g(row, "XCI"),
+        "SITE_ID": g(row, "XNBID"), "LOCAL_ID": g(row, "LOCAL_CID"),
+        "LAC/TAC": g(row, "LAC/TAC"), "PCI/PSC/BSIC": g(row, "PCI/PSC/BSIC"),
+        "EARFCN": is3 ? "" : ar, "UARFCN": is3 ? ar : "",
+        "BAND": g(row, "BAND"), "RSSI": fixNum(g(row, "RSSI")),
+        "RSRP": is3 ? "" : lvl, "RSCP": is3 ? lvl : "",
+        "RSRQ": is3 ? "" : q, "Ec/No": is3 ? q : "",
+        "SINR": fixNum(g(row, "SNR")), "TA": g(row, "TA"),
+        "LAT": fixNum(g(row, "LAT")), "LON": fixNum(g(row, "LON")),
+        "SPEED": fixNum(g(row, "SPEED")), "GPS_ACCURACY": g(row, "GPS_ACCURACY"),
+        "DATE": g(row, "DATE"), "TIME": g(row, "TIME")
+      };
+      const lat = Number(o.LAT), lon = Number(o.LON);
+      if (o.XCI && o.LAT !== "" && o.LON !== "" && Number.isFinite(lat) && Number.isFinite(lon) &&
+          Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0)) valid++;
+      out.push(OUT.map(c => o[c]));
+    }
+    if (!out.length) throw new GMonError("ไฟล์ G-Mon Pro ไม่มีข้อมูล");
+    if (!valid) throw new GMonError("ไฟล์ G-Mon Pro ไม่มีแถวที่มี XCI และพิกัด LAT/LON ถูกต้อง");
+    const tech = counts["4G"] >= counts["3G"] ? (counts["4G"] ? "4G" : "") : "3G";
+    return { csv: Papa.unparse({ fields: OUT, data: out }), rows: out.length, valid, tech, counts };
+  }
+
+  /* ---------- 5) Public pure function (also used for testing) ---------- */
+  function analyzeBuffer(buf) {
+    const { text, encoding } = decodeBuffer(buf);
+    if (!text.trim()) return { isGMon: false };
+    const delimiter = detectDelimiter(text);
+    const parsed = Papa.parse(text, { delimiter, skipEmptyLines: "greedy", header: false });
+    const table = parsed.data || [];
+    if (!table.length) return { isGMon: false };
+    const headers = table[0].map(h => String(h ?? "").replace(/^\uFEFF/, "").trim());
+    if (!looksLikeGMon(headers.map(key))) return { isGMon: false };
+    const r = convertRows(headers, table.slice(1));
+    return Object.assign({ isGMon: true, encoding, delimiter }, r);
+  }
+
+  const readBuffer = f => f.arrayBuffer ? f.arrayBuffer() : new Promise((res, rej) => {
+    const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsArrayBuffer(f);
+  });
+
+  function showError(text) {
+    const m = document.getElementById("fileMessage");
+    if (m) { m.textContent = text; m.style.color = "#fca5a5"; }
+    const b = document.getElementById("statusBadge");
+    if (b) b.textContent = "เกิดข้อผิดพลาด";
+    input.value = ""; // allow re-selecting the same file; existing data is left untouched
+  }
+
+  function refire() {
+    bypass = true;
+    try { input.dispatchEvent(new Event("change", { bubbles: true })); } finally { bypass = false; }
+  }
+
+  /* ---------- 6) Interceptor (capture phase, runs before the original listener) ---------- */
+  input.addEventListener("change", async e => {
+    if (bypass) return; // our own re-fired event -> let the original handler run
+    const msg = document.getElementById("fileMessage");
+    if (msg) msg.style.color = "";
+    const file = input.files && input.files[0];
+    if (!file || !/\.csv$/i.test(file.name)) return; // Excel / empty -> original flow, untouched
+    e.stopImmediatePropagation();
+
+    let result = null;
+    try {
+      result = analyzeBuffer(await readBuffer(file));
+    } catch (err) {
+      if (err instanceof GMonError) { showError("ไม่สามารถนำเข้าไฟล์: " + err.message); return; }
+      console.warn("[GMonPro add-on] detection failed, using original import:", err);
+      result = { isGMon: false };
+    }
+
+    if (!result.isGMon) { refire(); return; } // normal CellMapper CSV -> original behaviour
+
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(new File([result.csv], file.name, { type: "text/csv" }));
+      input.files = dt.files;
+    } catch (err) {
+      showError("ไม่สามารถแปลงไฟล์ G-Mon Pro ในเบราว์เซอร์นี้ได้: " + err.message);
+      return; // never pass unconverted G-Mon data to the original engine
+    }
+    const tech = document.getElementById("techSelect");
+    if (tech && result.tech) tech.value = result.tech;
+
+    const note = " • แปลงจาก G-Mon Pro อัตโนมัติ (" + (result.tech || "?") + ")";
+    const obs = new MutationObserver(() => {
+      if (msg && msg.textContent.startsWith("ไฟล์:") && !msg.textContent.includes("G-Mon")) {
+        msg.textContent += note; obs.disconnect();
+      }
+    });
+    if (msg) { obs.observe(msg, { childList: true, characterData: true, subtree: true }); setTimeout(() => obs.disconnect(), 5000); }
+    console.info("[GMonPro add-on]", { encoding: result.encoding, delimiter: result.delimiter, rows: result.rows, valid: result.valid, tech: result.tech });
+    refire();
+  }, true);
+
+  window.GMonProConverter = { analyzeBuffer }; // namespaced, read-only helper
+})();
+
+</script>
+<!-- ===== จบ Add-on ===== -->
+
 <script>
 (() => {
   "use strict";
@@ -176,14 +378,18 @@
     manualCoordinateLayer: null, baseLayer: null, analysisDone: false
   };
   const map = L.map("map", {preferCanvas:true}).setView([15.2,101.0],6);
-  const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © CARTO',subdomains:"abcd",maxZoom:20});
   const lightTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OpenStreetMap contributors",maxZoom:19});
   const satelliteTiles = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{attribution:"Tiles © Esri",maxZoom:19});
-  state.baseLayer = darkTiles.addTo(map);
+  const hybridImagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{attribution:"Tiles © Esri",maxZoom:19});
+  const hybridRoads = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,zIndex:2});
+  const hybridLabels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,zIndex:3});
+  const hybridTiles = L.layerGroup([hybridImagery,hybridRoads,hybridLabels]);
+  hybridTiles.bringToBack = () => { hybridImagery.bringToBack(); return hybridTiles; }; // ให้ปุ่ม "เปลี่ยนแผนที่" เดิมใช้งานได้กับชั้นแบบรวม
+  state.baseLayer = lightTiles.addTo(map);
   state.polygonGroup = L.featureGroup().addTo(map);
   state.labelGroup = L.featureGroup().addTo(map);
   state.taGroup = L.featureGroup();
-  L.control.layers({"แผนที่โทนมืด":darkTiles,"แผนที่ถนน":lightTiles,"แผนที่ดาวเทียม":satelliteTiles},{"พื้นที่ Cell":state.polygonGroup,"ป้าย Cell":state.labelGroup,"วง TA":state.taGroup},{collapsed:true}).addTo(map);
+  L.control.layers({"แผนที่ถนน":lightTiles,"แผนที่ดาวเทียม":satelliteTiles,"แผนที่ดาวเทียม + ถนน":hybridTiles},{"พื้นที่ Cell":state.polygonGroup,"ป้าย Cell":state.labelGroup,"วง TA":state.taGroup},{collapsed:true}).addTo(map);
 
   const aliases = {
     cell:["XCI","ECI","CELL ID","CELLID","CELL_ID","CI","CELL","CELL IDENTIFIER","GCI","CGI","UCELLID","CELL IDENTITY","XNBID","XNB ID","NBID"],
@@ -397,8 +603,9 @@
   $("analyzeBtn").addEventListener("click",()=>{try{analyze();}catch(e){console.error(e);alert("เกิดข้อผิดพลาดขณะวิเคราะห์: "+e.message);setStatus("วิเคราะห์ไม่สำเร็จ");}});
   $("clearBtn").addEventListener("click",clearAll);$("exportKmlBtn").addEventListener("click",exportKML);$("exportCsvBtn").addEventListener("click",exportCSV);
   $("fitBtn").addEventListener("click",()=>{const layers=[];if(state.trackLayer&&$("toggleTrack").checked)layers.push(state.trackLayer);state.cells.forEach(c=>{if(c.visible&&c.polygonLayer&&$("togglePolygons").checked)layers.push(c.polygonLayer);if(c.visible&&c.labelLayer&&$("toggleLabels").checked)layers.push(c.labelLayer);});const fg=L.featureGroup(layers);if(fg.getLayers().length&&fg.getBounds().isValid())map.fitBounds(fg.getBounds().pad(.12),{maxZoom:16});});
-  const baseMaps=[darkTiles,lightTiles,satelliteTiles];let baseMapIndex=0;
-  $("baseBtn").addEventListener("click",()=>{if(map.hasLayer(state.baseLayer))map.removeLayer(state.baseLayer);baseMapIndex=(baseMapIndex+1)%baseMaps.length;state.baseLayer=baseMaps[baseMapIndex];state.baseLayer.addTo(map);state.baseLayer.bringToBack();$("baseBtn").textContent=["เปลี่ยนแผนที่ (มืด)","เปลี่ยนแผนที่ (ถนน)","เปลี่ยนแผนที่ (ดาวเทียม)"][baseMapIndex];});
+  const baseMaps=[lightTiles,satelliteTiles,hybridTiles];let baseMapIndex=0;
+  $("baseBtn").addEventListener("click",()=>{if(map.hasLayer(state.baseLayer))map.removeLayer(state.baseLayer);baseMapIndex=(baseMapIndex+1)%baseMaps.length;state.baseLayer=baseMaps[baseMapIndex];state.baseLayer.addTo(map);state.baseLayer.bringToBack();$("baseBtn").textContent=["เปลี่ยนแผนที่ (ถนน)","เปลี่ยนแผนที่ (ดาวเทียม)","เปลี่ยนแผนที่ (ดาวเทียม+ถนน)"][baseMapIndex];});
+  map.on("baselayerchange",e=>{const i=baseMaps.indexOf(e.layer);if(i>=0){state.baseLayer=e.layer;baseMapIndex=i;$("baseBtn").textContent=["เปลี่ยนแผนที่ (ถนน)","เปลี่ยนแผนที่ (ดาวเทียม)","เปลี่ยนแผนที่ (ดาวเทียม+ถนน)"][i];}});
   $("toggleTrack").addEventListener("change",()=>{if(!state.trackLayer)return;if($("toggleTrack").checked)state.trackLayer.addTo(map);else map.removeLayer(state.trackLayer);});
   $("togglePolygons").addEventListener("change",()=>state.cells.forEach(c=>{if(c.polygonLayer&&c.visible&&$("togglePolygons").checked)c.polygonLayer.addTo(state.polygonGroup);else if(c.polygonLayer)state.polygonGroup.removeLayer(c.polygonLayer);}));
   $("toggleLabels").addEventListener("change",()=>state.cells.forEach(c=>{if(c.labelLayer&&c.visible&&$("toggleLabels").checked)c.labelLayer.addTo(state.labelGroup);else if(c.labelLayer)state.labelGroup.removeLayer(c.labelLayer);}));
