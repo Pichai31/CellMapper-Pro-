@@ -84,7 +84,7 @@
       <div><h2 class="font-bold text-lg">1. นำเข้าข้อมูล</h2><p class="muted text-xs mt-1">เลือกไฟล์ CSV หรือ Excel จากเครื่อง</p></div>
       <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv,text/comma-separated-values,application/csv,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:font-semibold file:text-white field p-2">
       <div><label for="sheetSelect" class="block text-sm mb-1">แผ่นงาน Excel</label><select id="sheetSelect" class="field w-full p-2" disabled><option>เลือกไฟล์ Excel ก่อน</option></select></div>
-      <div><label for="techSelect" class="block text-sm mb-1">ประเภทเครือข่าย</label><select id="techSelect" class="field w-full p-2"><option value="4G">4G LTE</option><option value="3G">3G UMTS</option></select></div>
+      <div><label for="techSelect" class="block text-sm mb-1">ประเภทเครือข่าย</label><select id="techSelect" class="field w-full p-2"><option value="4G">4G (LTE)</option><option value="3G">3G (UMTS)</option></select></div>
       <div><label for="cellColumn" class="block text-sm mb-1">คอลัมน์ Cell ID</label><select id="cellColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select><p class="muted text-xs mt-1">เช่น XCI, ECI, Cell ID, CI, GCI</p></div>
       <div><label for="latColumn" class="block text-sm mb-1">คอลัมน์ Latitude</label><select id="latColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select></div>
       <div><label for="lonColumn" class="block text-sm mb-1">คอลัมน์ Longitude</label><select id="lonColumn" class="field w-full p-2" disabled><option>นำเข้าไฟล์ก่อน</option></select></div>
@@ -167,8 +167,18 @@
     </div>
   </section>
   <div class="csd3-brand"><img src="https://i.postimg.cc/J4pbpG7h/medium-logo-cib-2-2x-1be93f4a36-dc4193cba8.png" alt="CSD3 Logo" class="csd3-image" onerror="this.style.display='none'"><div class="csd3-title">CSD3</div></div>
-  <footer class="text-center text-xs muted py-4 border-t border-slate-800">CellMapper Pro • ประมวลผลในเบราว์เซอร์ • ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปใช้งาน<br>™ฝ่ายวิเคราะห์ข้อมูล • ชุดปฏิบัติการพิเศษ • ผู้พัฒนา: ®ยามเหงา</footer>
+  <footer class="text-center text-xs muted py-4 border-t border-slate-800">CellMapper Pro • ประมวลผลในเบราว์เซอร์ • ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปใช้งาน<br>ฝ่ายวิเคราะห์ข้อมูล • ชุดปฏิบัติการพิเศษ • ผู้พัฒนา: ส.ต.อ.พิชัย สมปัญญา</footer>
 </main>
+
+<!-- ===== [เพิ่มใหม่ v1.18] Cell Detail Modal ===== -->
+<div id="cellDetailBackdrop" class="gps-modal-backdrop" aria-hidden="true">
+  <div class="gps-modal" role="dialog" aria-modal="true" aria-labelledby="cellDetailTitle">
+    <div class="brand">CSD3</div>
+    <h3 id="cellDetailTitle">รายละเอียด Cell</h3>
+    <div id="cellDetailBody"></div>
+    <div class="gps-modal-actions"><button id="cellDetailClose" type="button" class="btn btn-primary">ปิด</button></div>
+  </div>
+</div>
 
 <!-- ===== CSD3 GPS Permission Modal (เพิ่มใหม่) ===== -->
 <div id="gpsModalBackdrop" class="gps-modal-backdrop" aria-hidden="true">
@@ -504,13 +514,18 @@
     headers.forEach(h=>{const opt=document.createElement("option");opt.value=h;opt.textContent=h;if(h===selected)opt.selected=true;select.appendChild(opt);});
     select.disabled=headers.length===0;
   }
+  /* [แก้ไข v1.18] รายชื่อคอลัมน์ Cell ID ตามประเภทเครือข่าย: 3G -> SITE_ID , 4G -> XCI */
+  function cellAliasesFor(tech){
+    return tech==="3G"?["SITE_ID","SITE ID","XNBID","XNB ID","NBID","UCELLID","CELL ID","CI","CELL"]:["XCI","ECI","GCI","CGI","CELL ID","CI","CELL"];
+  }
   function setupSelectors(){
     const tech=$("techSelect").value;
-    const cellAliases=tech==="3G"?["XNBID","XNB ID","NBID","UCELLID","CELL ID","CI","CELL"]:["XCI","ECI","GCI","CGI","CELL ID","CI","CELL"];
+    const cellAliases=cellAliasesFor(tech);
     fillSelect($("cellColumn"),state.headers,findHeader(cellAliases)||findHeader(aliases.cell));
     fillSelect($("latColumn"),state.headers,findHeader(aliases.lat));
     fillSelect($("lonColumn"),state.headers,findHeader(aliases.lon));
-    if(state.wizStd){$("cellColumn").value="CELL_ID";$("latColumn").value="LAT";$("lonColumn").value="LON";}
+    if(state.wizStd){$("cellColumn").value="CELL_ID";$("latColumn").value="LAT";$("lonColumn").value="LON";
+      const tc=exactHeader(tech==="3G"?["SITE_ID","SITE ID"]:["XCI"]);if(tc)$("cellColumn").value=tc;}
     $("analyzeBtn").disabled=!state.rawRows.length||!state.headers.length;
   }
   async function parseFile(file){
@@ -619,8 +634,9 @@
   const wiz={orig:[],headers:[],map:{}};
   const wizEl=id=>document.getElementById(id);
   function wizAutoMap(){
-    const h=wiz.headers,t=$("techSelect").value;
-    const ca=t==="3G"?["XNBID","XNB ID","NBID","UCELLID","CELL ID","CI","CELL"]:["XCI","ECI","GCI","CGI","CELL ID","CI","CELL"];
+    const h=wiz.headers;
+    /* [แก้ไข v1.18] Cell ID ตามประเภทเครือข่าย: 3G -> SITE_ID , 4G -> XCI */
+    const ca=cellAliasesFor($("techSelect").value);
     wiz.map={};
     WZ.forEach(f=>{const k=f[1];wiz.map[k]=k==="CELL_ID"?(findHeader(ca,h)||findHeader(aliases.cell,h)):k==="LAT"?findHeader(aliases.lat,h):k==="LON"?findHeader(aliases.lon,h):findHeader(f[3],h);});
   }
@@ -663,7 +679,7 @@
     const out=wiz.orig.map(r=>{const o={};keys.forEach(k=>{o[k]=m[k]?(r[m[k]]??""):"";});   // คอลัมน์มาตรฐาน (Cell ID คงเป็นข้อความเดิม)
       wiz.headers.forEach(h=>{if(!stdNorm.has(norm(h))&&!(h in o))o[h]=r[h];});return o;});   // คอลัมน์ต้นฉบับอื่นคงไว้ครบ
     if(m.SYSTEM&&(st.tech["3G"]||st.tech["4G"]))$("techSelect").value=st.tech["4G"]>=st.tech["3G"]?"4G":"3G";
-    state.rawRows=out;state.headers=Object.keys(out[0]||{});state.wizStd=true;state.analysisDone=false;
+    state.rawRows=out;state.headers=Object.keys(out[0]||{});state.wizStd=true;state.lacTacSrc=m["LAC/TAC"]||"";state.analysisDone=false;
     setupSelectors();setStatus("จับคู่คอลัมน์แล้ว");
     $("analyzeBtn").disabled=false;$("analyzeBtn").click();                                   // ส่งเข้า analyze() เดิม -> Leaflet / Hull / Buffer / TA / KML
     if(window.innerWidth<1280){const mp=document.getElementById("map");if(mp)mp.scrollIntoView({behavior:"smooth",block:"center"});}
@@ -713,6 +729,62 @@
   }
   function meanNumeric(group,key){const vals=group.map(r=>toNum(r[key])).filter(Number.isFinite);return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;}
   function fmt(v,digits=2){return v===null||v===undefined||v===""||!Number.isFinite(Number(v))?"ไม่มีข้อมูล":Number(v).toFixed(digits);}
+  /* ===== [เพิ่มใหม่ v1.18] อ่านค่า TAC / LAC / MCC / MNC ตามประเภทเครือข่ายที่เลือก ===== */
+  function exactHeader(names){
+    for(const n of names){const k=norm(n);const h=state.headers.find(x=>norm(x)===k);if(h!==undefined)return h;}
+    return null;
+  }
+  const cellTech=()=>$("techSelect").value==="3G"?"3G":"4G";
+  /* 4G -> อ่านเฉพาะคอลัมน์ TAC / 3G -> อ่านเฉพาะคอลัมน์ LAC ; ถ้าไฟล์มีเฉพาะคอลัมน์รวม "LAC/TAC" จึงใช้คอลัมน์รวม
+     (และไม่ใช้เมื่อคอลัมน์รวมนั้นมาจากคอลัมน์ของอีกเครือข่าย หรือแถวนั้นระบุ SYSTEM เป็นอีกเครือข่าย) */
+  function rowLacTac(original,tech){
+    const is3=tech==="3G";
+    const own=exactHeader(is3?["LAC","LOCATION AREA CODE"]:["TAC","TRACKING AREA CODE"]);
+    if(own){const v=String(original[own]??"").trim();if(v)return v;}
+    const comb=exactHeader(["LAC/TAC"]);
+    if(comb){
+      if(state.wizStd&&state.lacTacSrc&&norm(state.lacTacSrc)===norm(is3?"TAC":"LAC"))return"";
+      const sh=exactHeader(["SYSTEM"]);
+      if(sh){const t=wizTech(original[sh]);if((t==="3G"||t==="4G")&&t!==tech)return"";}
+      return String(original[comb]??"").trim();
+    }
+    return"";
+  }
+  function rowMccMnc(original,plmnVal){
+    const p=parsePLMN(plmnVal);if(p.mcc)return p;
+    const hm=exactHeader(["MCC"]),hn=exactHeader(["MNC"]);
+    return{mcc:hm?String(original[hm]??"").trim():"",mnc:hn?String(original[hn]??"").trim():""};
+  }
+  /* รวมชุดข้อมูล (LAC/TAC, MCC, MNC) ที่ไม่ซ้ำกันของ Cell จากแถวข้อมูลจริงที่นำเข้า */
+  function cellCombos(cell,tech){
+    const map=new Map();
+    cell.group.forEach(r=>{
+      const lt=rowLacTac(r.original,tech),mm=rowMccMnc(r.original,r.plmn),k=lt+"|"+mm.mcc+"|"+mm.mnc;
+      const e=map.get(k);if(e)e.count++;else map.set(k,{lacTac:lt,mcc:mm.mcc,mnc:mm.mnc,count:1});
+    });
+    return[...map.values()].sort((a,b)=>b.count-a.count);
+  }
+  function cellLacTac(cell){const c=cellCombos(cell,cellTech()).find(x=>x.lacTac);return c?c.lacTac:"";}
+  function openCellModal(id){
+    const cell=state.cells.find(c=>c.id===id);if(!cell)return;
+    state.modalCell=id;renderCellModal();
+    const b=$("cellDetailBackdrop");b.classList.add("open");b.setAttribute("aria-hidden","false");
+    const x=$("cellDetailClose");if(x)x.focus();
+  }
+  function closeCellModal(){
+    const b=$("cellDetailBackdrop");b.classList.remove("open");b.setAttribute("aria-hidden","true");state.modalCell=null;
+  }
+  function renderCellModal(){
+    const cell=state.cells.find(c=>c.id===state.modalCell);if(!cell)return;
+    const tech=cellTech(),is4G=tech==="4G",dash=v=>(v===null||v===undefined||String(v).trim()==="")?"-":String(v).trim();
+    const combos=cellCombos(cell,tech);
+    const block=c=>[["Cell ID",cell.id],[is4G?"TAC":"LAC",c.lacTac],["MCC",c.mcc],["MNC",c.mnc]]
+      .map(([k,v])=>`<div class="flex justify-between gap-3 border-b border-slate-800 py-1"><span class="muted">${escapeHtml(k)}</span><span class="text-right break-all font-medium">${escapeHtml(dash(v))}</span></div>`).join("");
+    $("cellDetailTitle").textContent="รายละเอียด Cell • "+(is4G?"4G (LTE)":"3G (UMTS)");
+    $("cellDetailBody").innerHTML=`<p class="muted text-xs mb-2">จำนวนจุด: ${cell.count.toLocaleString()}</p>`+
+      (combos.length>1?`<p class="text-xs mb-2" style="color:#f5d99c">พบ Cell ID นี้ในไฟล์ที่มีข้อมูล ${is4G?"TAC":"LAC"} / MCC / MNC แตกต่างกัน ${combos.length} ชุด</p>`:"")+
+      combos.map((c,i)=>`<div class="${combos.length>1?"rounded-lg border border-slate-700 p-2 mb-2":""}">${combos.length>1?`<div class="text-xs muted mb-1">ชุดที่ ${i+1} • ${c.count.toLocaleString()} จุด</div>`:""}${block(c)}</div>`).join("");
+  }
   function analyze(){
     if(!state.rawRows.length)return;
     const cellCol=$("cellColumn").value,latCol=$("latColumn").value,lonCol=$("lonColumn").value;
@@ -722,7 +794,7 @@
     for(const original of state.rawRows){
       const lat=toNum(original[latCol],true),lon=toNum(original[lonCol],true),cell=String(original[cellCol]??"").trim();
       const hasCell=!!cell,numOk=Number.isFinite(lat)&&Number.isFinite(lon),inRange=numOk&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180;if(hasCell)st.cell++;if(numOk)st.num++;if(inRange)st.coord++;if(!hasCell||!inRange){invalid++;continue;}
-      rows.push({original,cell,lat,lon,date:getVal(original,aliases.date),time:getVal(original,aliases.time),plmn:getVal(original,aliases.plmn),pci:getVal(original,aliases.pci),tac:getVal(original,aliases.tac),ta:getVal(original,aliases.ta),earfcn:getVal(original,["EARFCN"]),uarfcn:getVal(original,["UARFCN"]),rsrp:getVal(original,["RSRP"]),rsrq:getVal(original,["RSRQ"]),sinr:getVal(original,["SINR"]),rscp:getVal(original,["RSCP"]),ecno:getVal(original,["EC/NO","ECNO"])});
+      rows.push({original,cell,lat,lon,date:getVal(original,aliases.date),time:getVal(original,aliases.time),plmn:getVal(original,aliases.plmn),pci:getVal(original,aliases.pci),tac:rowLacTac(original,cellTech()),ta:getVal(original,aliases.ta),earfcn:getVal(original,["EARFCN"]),uarfcn:getVal(original,["UARFCN"]),rsrp:getVal(original,["RSRP"]),rsrq:getVal(original,["RSRQ"]),sinr:getVal(original,["SINR"]),rscp:getVal(original,["RSCP"]),ecno:getVal(original,["EC/NO","ECNO"])});
     }
     const total=(state.importInfo&&state.importInfo.total)||state.rawRows.length;
     const summary=`แถวทั้งหมด ${total.toLocaleString()} • อ่านได้ ${state.rawRows.length.toLocaleString()} • มี Cell ID ${st.cell.toLocaleString()} • พิกัดถูกต้อง ${st.coord.toLocaleString()} • ผ่านทั้งสองเงื่อนไข ${rows.length.toLocaleString()} • ไม่ผ่าน ${invalid.toLocaleString()}`;
@@ -730,8 +802,8 @@
     if(!rows.length){const why=st.cell===0?`คอลัมน์ Cell ID "${cellCol}" ไม่มีค่า`:st.num===0?`ไม่พบข้อมูลพิกัดที่เป็นตัวเลขในคอลัมน์ "${latCol}" / "${lonCol}"`:st.coord===0?`พบข้อมูลพิกัดแต่อยู่นอกช่วง (Lat ต้อง -90..90, Lon ต้อง -180..180) — ลองตรวจว่าเลือก Lat/Lon สลับกันหรือไม่`:"ไม่มีแถวที่มีทั้ง Cell ID และพิกัดถูกต้องพร้อมกัน";alert("ไม่พบแถวที่มี Cell ID และพิกัดถูกต้อง\nสาเหตุ: "+why+"\n\n"+summary);return;}
     state.rows=rows;const grouped=new Map();rows.forEach(r=>{if(!grouped.has(r.cell))grouped.set(r.cell,[]);grouped.get(r.cell).push(r);});
     const cells=[...grouped.entries()].map(([id,group])=>{
-      const lats=group.map(r=>r.lat),lons=group.map(r=>r.lon),center=[lats.reduce((a,b)=>a+b,0)/lats.length,lons.reduce((a,b)=>a+b,0)/lons.length],first=group[0],plmn=parsePLMN(first.plmn);
-      return{id,group,count:group.length,color:"",colorHex:"",center,mcc:plmn.mcc,mnc:plmn.mnc,pci:first.pci,tac:first.tac,plmnRaw:first.plmn,earfcn:first.earfcn,uarfcn:first.uarfcn,rsrp:meanNumeric(group,"rsrp"),rsrq:meanNumeric(group,"rsrq"),sinr:meanNumeric(group,"sinr"),rscp:meanNumeric(group,"rscp"),ecno:meanNumeric(group,"ecno"),ta:first.ta,feature:null,polygonLayer:null,labelLayer:null,visible:true};
+      const lats=group.map(r=>r.lat),lons=group.map(r=>r.lon),center=[lats.reduce((a,b)=>a+b,0)/lats.length,lons.reduce((a,b)=>a+b,0)/lons.length],first=group[0],plmn=(group.map(r=>rowMccMnc(r.original,r.plmn)).find(x=>x.mcc)||{mcc:"",mnc:""});
+      return{id,group,count:group.length,color:"",colorHex:"",center,mcc:plmn.mcc,mnc:plmn.mnc,pci:first.pci,tac:((group.find(r=>r.tac)||{}).tac||""),plmnRaw:first.plmn,earfcn:first.earfcn,uarfcn:first.uarfcn,rsrp:meanNumeric(group,"rsrp"),rsrq:meanNumeric(group,"rsrq"),sinr:meanNumeric(group,"sinr"),rscp:meanNumeric(group,"rscp"),ecno:meanNumeric(group,"ecno"),ta:first.ta,feature:null,polygonLayer:null,labelLayer:null,visible:true};
     }).sort((a,b)=>a.id.localeCompare(b.id,undefined,{numeric:true}));
     cells.forEach((c,i)=>{c.color=randomColor(i);c.colorHex=hslToHex(c.color);});
     state.cells=cells;clearMapLayers();
@@ -740,8 +812,8 @@
     cells.forEach(cell=>{
       cell.feature=buildPolygonForCell(cell.group,bufferMeters);
       if(cell.feature&&cell.count>=minPts){
-        cell.polygonLayer=L.geoJSON(cell.feature,{style:{color:cell.colorHex,weight:1.5,opacity:.95,fillColor:cell.colorHex,fillOpacity:.24},onEachFeature:(_f,layer)=>layer.on("click",()=>selectCell(cell.id))});
-        cell.polygonLayer.bindPopup(`<b>Cell ${escapeHtml(cell.id)}</b><br>จำนวนจุด: ${cell.count}<br>คลิกเพื่อดูรายละเอียด`);
+        cell.polygonLayer=L.geoJSON(cell.feature,{style:{/* [แก้ไข v1.19] ยกเลิกเส้นขอบ Polygon: stroke:false, weight:0, opacity:0 (คง fillColor/fillOpacity เดิม) */stroke:false,color:cell.colorHex,weight:0,opacity:0,fillColor:cell.colorHex,fillOpacity:.24},onEachFeature:(_f,layer)=>layer.on("click",()=>selectCell(cell.id))});
+        cell.polygonLayer.bindPopup(`<b>Cell ${escapeHtml(cell.id)}</b><br>จำนวนจุด: ${cell.count}<br><a href="#" class="cell-detail-link" data-cell="${escapeHtml(cell.id)}" style="color:#38bdf8;text-decoration:underline;cursor:pointer">คลิกเพื่อดูรายละเอียด</a>`);
         if($("togglePolygons").checked)cell.polygonLayer.addTo(state.polygonGroup);
       }
       cell.labelLayer=L.circleMarker(cell.center,{radius:4,color:cell.colorHex,weight:1.5,fillColor:cell.colorHex,fillOpacity:1});
@@ -784,8 +856,8 @@
     const cell=state.cells.find(c=>c.id===id);if(!cell)return;state.selectedCell=id;
     const is4G=$("techSelect").value==="4G";
     const fields=[
-      ["Technology",is4G?"4G LTE":"3G UMTS"],["Cell ID / XCI",cell.id],["MCC",cell.mcc||"ไม่มีข้อมูล"],["MNC",cell.mnc||"ไม่มีข้อมูล"],["PLMN",cell.plmnRaw||"ไม่มีข้อมูล"],
-      [is4G?"PCI":"PSC",cell.pci||"ไม่มีข้อมูล"],[is4G?"TAC":"LAC",cell.tac||"ไม่มีข้อมูล"],["EARFCN",cell.earfcn||"ไม่มีข้อมูล"],["UARFCN",cell.uarfcn||"ไม่มีข้อมูล"],
+      ["Technology",is4G?"4G LTE":"3G UMTS"],[is4G?"Cell ID / XCI":"Cell ID / SITE ID",cell.id],["MCC",cell.mcc||"ไม่มีข้อมูล"],["MNC",cell.mnc||"ไม่มีข้อมูล"],["PLMN",cell.plmnRaw||"ไม่มีข้อมูล"],
+      [is4G?"PCI":"PSC",cell.pci||"ไม่มีข้อมูล"],[is4G?"TAC":"LAC",cellLacTac(cell)||"ไม่มีข้อมูล"],["EARFCN",cell.earfcn||"ไม่มีข้อมูล"],["UARFCN",cell.uarfcn||"ไม่มีข้อมูล"],
       ["จำนวนจุด GPS",cell.count.toLocaleString()],["Latitude เฉลี่ย",fmt(cell.center[0],6)],["Longitude เฉลี่ย",fmt(cell.center[1],6)],["RSRP เฉลี่ย (dBm)",fmt(cell.rsrp)],["RSRQ เฉลี่ย (dB)",fmt(cell.rsrq)],["SINR เฉลี่ย (dB)",fmt(cell.sinr)],["RSCP เฉลี่ย (dBm)",fmt(cell.rscp)],["Ec/No เฉลี่ย (dB)",fmt(cell.ecno)],["TA ตัวอย่าง",cell.ta===""||cell.ta==null?"ไม่มีข้อมูล":String(cell.ta)]
     ];
     $("detailPanel").innerHTML=`<div class="flex items-center gap-2 mb-3"><span class="inline-block w-4 h-4 rounded" style="background:${cell.colorHex}"></span><div class="font-bold break-all">${escapeHtml(cell.id)}</div></div><div class="space-y-2">${fields.map(([k,v])=>`<div class="flex justify-between gap-3 border-b border-slate-800 pb-1"><span class="muted">${escapeHtml(k)}</span><span class="text-right break-all font-medium">${escapeHtml(v)}</span></div>`).join("")}</div><div class="mt-3 flex gap-2"><button id="zoomCellBtn" class="btn btn-secondary text-xs flex-1">ซูมไปยัง Cell</button><button id="toggleSelectedBtn" class="btn btn-secondary text-xs flex-1">${cell.visible?"ซ่อน Cell":"แสดง Cell"}</button></div>`;
@@ -821,6 +893,27 @@
   $("fileInput").addEventListener("change",e=>{const file=e.target.files?.[0];if(file)parseFile(file);});
   $("sheetSelect").addEventListener("change",()=>{loadRows(readWorkbookSheet($("sheetSelect").value));});
   $("techSelect").addEventListener("change",()=>{if(state.headers.length)setupSelectors();$("statTech").textContent=state.rawRows.length?($("techSelect").value==="4G"?"4G LTE":"3G UMTS"):"ยังไม่เลือก";if(state.analysisDone)setStatus("เปลี่ยนเครือข่ายแล้ว กรุณาวิเคราะห์ใหม่");});
+
+  /* ===== [เพิ่มใหม่ v1.18] เปลี่ยน 3G/4G -> รายละเอียด Cell (แผงข้าง + Modal) เปลี่ยนทันที ===== */
+  $("techSelect").addEventListener("change",()=>{
+    if(state.analysisDone){
+      /* Cell ID เปลี่ยนตามเครือข่าย (3G=SITE_ID / 4G=XCI) จึงติดตาม Cell เดิมผ่านแถวข้อมูลเดียวกัน แล้วชี้ไปยังรหัสใหม่ */
+      const repOf=id=>{const c=state.cells.find(x=>x.id===id);return c&&c.group[0]?c.group[0].original:null;};
+      const selOrig=repOf(state.selectedCell),modOrig=repOf(state.modalCell);
+      try{analyze();}catch(e){console.error(e);}
+      const findBy=o=>o?state.cells.find(c=>c.group.some(r=>r.original===o)):null;
+      const ns=findBy(selOrig);if(ns)selectCell(ns.id);
+      if(state.modalCell){const nm=findBy(modOrig);if(nm){state.modalCell=nm.id;renderCellModal();}else closeCellModal();}
+    }else if(state.modalCell)renderCellModal();
+  });
+  /* คลิก "คลิกเพื่อดูรายละเอียด" ใน Popup ของแผนที่ -> เปิด Modal (ใช้ capture เพื่อไม่ถูก Leaflet บล็อก) */
+  document.addEventListener("click",e=>{
+    const a=e.target&&e.target.closest?e.target.closest(".cell-detail-link"):null;
+    if(!a)return;e.preventDefault();e.stopPropagation();openCellModal(a.getAttribute("data-cell"));
+  },true);
+  $("cellDetailClose").addEventListener("click",closeCellModal);
+  $("cellDetailBackdrop").addEventListener("click",e=>{if(e.target===$("cellDetailBackdrop"))closeCellModal();});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("cellDetailBackdrop").classList.contains("open"))closeCellModal();});
   $("analyzeBtn").addEventListener("click",()=>{try{analyze();}catch(e){console.error(e);alert("เกิดข้อผิดพลาดขณะวิเคราะห์: "+e.message);setStatus("วิเคราะห์ไม่สำเร็จ");}});
   $("clearBtn").addEventListener("click",clearAll);$("exportKmlBtn").addEventListener("click",exportKML);$("exportCsvBtn").addEventListener("click",exportCSV);
   $("fitBtn").addEventListener("click",()=>{const layers=[];if(state.trackLayer&&$("toggleTrack").checked)layers.push(state.trackLayer);state.cells.forEach(c=>{if(c.visible&&c.polygonLayer&&$("togglePolygons").checked)layers.push(c.polygonLayer);if(c.visible&&c.labelLayer&&$("toggleLabels").checked)layers.push(c.labelLayer);});const fg=L.featureGroup(layers);if(fg.getLayers().length&&fg.getBounds().isValid())map.fitBounds(fg.getBounds().pad(.12),{maxZoom:16});});
